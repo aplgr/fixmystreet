@@ -60,7 +60,7 @@ STAGING_FLAGS:
 
 # What to use as front page/alert example places placeholder
 # Defaults to High Street, Main Street
-EXAMPLE_PLACES: [ 'High Street', 'Main Street' ]
+EXAMPLE_PLACES: [ 'Park Ave', 'Ellison St' ]
 
 # An array of languages for the site, in the following format:
 # <language code>,<pretty name>,<locale>
@@ -140,7 +140,7 @@ MAPIT_TYPES_CHILDREN: ''
 
 # Which service to use to look up results from e.g. front page searches.
 # Possible choices are Google, Bing, or OSM (blank will use OSM by default).
-GEOCODER: ''
+GEOCODER: 'OSM'
 
 # If you wish to use Google Maps or Bing Maps Geocoding, get and put the
 # relevant key here.
@@ -164,7 +164,10 @@ BING_MAPS_API_KEY: ''
 #     google_country: <.ccTLD to restrict results to>
 #     lang: <language for results>
 #
-GEOCODING_DISAMBIGUATION: ''
+GEOCODING_DISAMBIGUATION:
+  country: 'us'
+  town: 'Paterson, NJ'
+  bounds: [40.8833, -74.2157, 40.9445, -74.1417]
 
 # The type of map you want to use. If left blank, the default is OpenStreetMap.
 # Other options are currently pretty UK specific, including "FMS" for UK

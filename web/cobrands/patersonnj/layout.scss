@@ -2,5 +2,14 @@
 @import "../sass/layout";
 
 a.platform-logo {
+    vertical-align: baseline;
+    display: inline-block;
+    background-position: top left;
+    background-repeat: no-repeat;
+    background-size: auto 1.5em;
     background-image: url(/cobrands/patersonnj/images/getspiffyclean.png);
+    text-indent: -1000%;
+    height: 1.7em;
+    width: 16em;
+    padding-#{$right}: 0.25em;
 }

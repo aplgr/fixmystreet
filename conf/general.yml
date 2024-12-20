@@ -14,14 +14,15 @@
 # for you.
 
 # PostgreSQL database details for FixMyStreet
-FMS_DB_HOST: 'postgres.svc'
+FMS_DB_HOST: ''
 FMS_DB_PORT: '5432'
 FMS_DB_NAME: 'fixmystreet'
 FMS_DB_USER: 'fms'
-FMS_DB_PASS: 'fms'
+FMS_DB_PASS: ''
+FMS_DB_SSLMODE: 'prefer'
 
 # The base URL of the install.
-BASE_URL: 'http://localhost:8000'
+BASE_URL: 'http://ec2-34-250-123-126.eu-west-1.compute.amazonaws.com'
 # Use the below if you're using the Catalyst development server
 #   BASE_URL: 'http://localhost:3000'
 SECURE_PROXY_SSL_HEADER: ''
@@ -33,18 +34,14 @@ CONTENT_SECURITY_POLICY: ''
 # allow JavaScript on, or want to specify extra script-src CSP directives, set
 # this to a e.g. space-separated list of domains or a list of the same.
 
-# This is so the fixmystreet container knows it is running
-# behind an nginx container (not on the same host)
-using_frontend_proxy: 1
-
 # Email domain used for emails, and contact name/email for admin use.
-EMAIL_DOMAIN: '127.0.0.1.xip.io'
-CONTACT_EMAIL: 'help@127.0.0.1.xip.io'
+EMAIL_DOMAIN: 'ec2-34-250-123-126.eu-west-1.compute.amazonaws.com'
+CONTACT_EMAIL: 'help@ec2-34-250-123-126.eu-west-1.compute.amazonaws.com'
 CONTACT_NAME: 'FixMyStreet'
 # Address used for emails you don't expect a reply to (e.g. confirmation
 # emails); can be same as CONTACT_EMAIL above, of course, if you don't have a
 # special address.
-DO_NOT_REPLY_EMAIL: 'help@127.0.0.1.xip.io'
+DO_NOT_REPLY_EMAIL: 'help@ec2-34-250-123-126.eu-west-1.compute.amazonaws.com'
 
 # Whether this is a development site or not. It will mean e.g. templates/
 # CSS modified times aren't cached
@@ -118,7 +115,7 @@ PHOTO_STORAGE_OPTIONS:
 #   MAPIT_URL: 'http://global.mapit.mysociety.org/'
 # And then specify whichever type code have the boundaries you want:
 #   MAPIT_TYPES: [ 'O06' ]
-MAPIT_URL: 'http://localhost:9000/fakemapit/'
+MAPIT_URL: ''
 MAPIT_TYPES: [ 'ZZZ' ]
 
 # If the MapIt you're using in MAPIT_URL requires an API key
@@ -241,7 +238,7 @@ GAZE_URL: 'https://gaze.mysociety.org/gaze'
 
 # Memcached host
 # This can be safely left out and will default to '127.0.0.1' even if not present.
-MEMCACHED_HOST: 'memcached.svc'
+MEMCACHED_HOST: '127.0.0.1'
 
 # Cache timeout - integer, optional, default 3600s (1 hour)
 # Used for cache of front page stats/recent list, and /reports max-age.
@@ -288,3 +285,8 @@ FETCH_COMMENTS_PROCESS_TIMEOUT: 0
 # If you use the daemon for sending reports, rather than the cron script,
 # this is how many children it will have.
 QUEUE_DAEMON_PROCESSES: 4
+
+O311_POLLING_INTERVAL: 2
+O311_POLLING_MAX_TRIES: 5
+
+WASTEWORKS_BACKEND_TMP_DIR: '/tmp'

@@ -226,11 +226,11 @@ TWITTER_SECRET: ''
 # If you wish to send email through a SMTP server elsewhere, change these
 # variables. SMTP_TYPE should be one of '', 'ssl' or 'tls'. SMTP_PORT will
 # default to 587 (tls), 465 (ssl), or 25.
-SMTP_SMARTHOST: 'localhost'
-SMTP_TYPE: ''
-SMTP_PORT: ''
-SMTP_USERNAME: ''
-SMTP_PASSWORD: ''
+SMTP_SMARTHOST: 'smtp.gmail.com'
+SMTP_TYPE: 'tls'
+SMTP_PORT: '587'
+SMTP_USERNAME: 'fms-test@gmail.com'
+SMTP_PASSWORD: 'fms-testmail-password'
 
 # Set if you want password setting to be checked (securely) against the
 # Have I Been Pwned dataset

@@ -3,7 +3,7 @@ use base 'FixMyStreet::Cobrand::Default';
 
 use DateTime;
 use POSIX qw(strcoll);
-use RABX;
+use JSON::MaybeXS;
 use List::Util qw(min);
 use Scalar::Util 'blessed';
 use DateTime::Format::Pg;
@@ -197,9 +197,7 @@ sub allow_photo_display {
     } else {
         # additional munging in case $r isn't an object, TODO see if we can remove this
         my $extra = $r->{extra};
-        utf8::encode($extra) if utf8::is_utf8($extra);
-        my $h = new IO::String($extra);
-        $extra = RABX::wire_rd($h);
+        $extra = JSON->new->decode($extra);
         return unless ref $extra eq 'HASH';
         $publish_photo = $extra->{publish_photo};
     }
@@ -249,6 +247,19 @@ my @public_holidays = (
     '2022-04-25', '2022-05-26', '2022-06-06',
     '2022-08-01', '2022-09-12', '2022-12-26',
     '2022-05-27', '2022-12-27', '2022-12-28', '2022-12-29', '2022-12-30',
+
+    '2023-12-25', '2023-12-26', '2023-12-27', '2023-12-28', '2023-12-29',
+
+    '2024-01-01', '2024-01-02', '2024-03-29', '2024-04-01',
+    '2024-04-15', '2024-05-01', '2024-05-09', '2024-05-20',
+    '2024-08-01', '2024-09-09', '2024-12-25', '2024-12-26',
+    '2024-03-28', '2024-05-08', '2024-05-10', '2024-12-24', '2024-12-26', '2024-12-27', '2024-12-30', '2024-12-31',
+
+    '2025-01-01', '2025-01-02', '2025-04-18', '2025-04-21',
+    '2025-04-28', '2025-05-01', '2025-05-29', '2025-06-09',
+    '2025-08-01', '2025-09-15', '2025-12-25', '2025-12-26',
+    '2025-04-17', '2025-05-28', '2025-05-30', '2025-12-24', '2025-12-29', '2025-12-30', '2025-12-31',
+
 );
 
 sub working_days {
@@ -661,7 +672,7 @@ sub admin_report_edit {
         #   Note that 2 types of email may be sent
         #    1) _admin_send_email()  sends an email to the *user*, if their email is confirmed
         #
-        #    2) setting $problem->whensent(undef) may make it eligible for generating an email
+        #    2) calling $problem->resend may make it eligible for generating an email
         #   to the body (internal or external).  See DBRS::Problem->send_reports for Zurich-
         #   specific categories which are eligible for this.
 
@@ -680,7 +691,7 @@ sub admin_report_edit {
         }
 
         if (
-            ($state eq 'confirmed') 
+            ($state eq 'confirmed')
             && $new_cat
             && $new_cat ne $problem->category
         ) {
@@ -689,7 +700,7 @@ sub admin_report_edit {
             $problem->category( $new_cat );
             $problem->external_body( undef );
             $problem->bodies_str( $cat->body_id );
-            $problem->whensent( undef );
+            $problem->resend;
             $problem->set_extra_metadata(changed_category => 1);
             $internal_note_text = "Weitergeleitet von $old_cat an $new_cat";
             $self->update_admin_log($c, $problem, "Changed category from $old_cat to $new_cat");
@@ -715,7 +726,7 @@ sub admin_report_edit {
             $self->set_problem_state($c, $problem, 'in progress');
             $problem->external_body( undef );
             $problem->bodies_str( $subdiv );
-            $problem->whensent( undef );
+            $problem->resend;
             $redirect = 1;
         } else {
             if ($state) {
@@ -755,7 +766,7 @@ sub admin_report_edit {
                     $problem->external_body( $external );
                 }
                 if ($problem->external_body && $c->get_param('publish_response')) {
-                    $problem->whensent( undef );
+                    $problem->resend;
                     $self->set_problem_state($c, $problem, $state);
                     my $template = ($state eq 'wish') ? 'problem-wish.txt' : 'problem-external.txt';
                     _admin_send_email( $c, $template, $problem );
@@ -940,7 +951,7 @@ sub admin_report_edit {
                 } else {
                     $problem->set_extra_metadata( subdiv_overdue => $self->overdue( $problem ) );
                     $problem->bodies_str( $body->parent->id );
-                    $problem->whensent( undef );
+                    $problem->resend;
                     $self->set_problem_state($c, $problem, 'feedback pending');
                 }
                 $problem->update;
@@ -1053,7 +1064,7 @@ sub stash_states {
 
     # stash details about the public response
     $c->stash->{default_public_response} = "\nFreundliche Grüsse\n\nIhre Stadt Zürich\n";
-    $c->stash->{show_publish_response} = 
+    $c->stash->{show_publish_response} =
         ($problem->state eq 'feedback pending');
 }
 
@@ -1174,7 +1185,7 @@ sub admin_stats {
         $c->stash->{start_date} = DateTime->new( year => $y, month => $m, day => 1 );
         $c->stash->{end_date} = $c->stash->{start_date} + DateTime::Duration->new( months => 1 );
         $optional_params{'me.created'} = {
-            '>=', DateTime::Format::Pg->format_datetime($c->stash->{start_date}), 
+            '>=', DateTime::Format::Pg->format_datetime($c->stash->{start_date}),
             '<',  DateTime::Format::Pg->format_datetime($c->stash->{end_date}),
         };
     }
@@ -1209,11 +1220,11 @@ sub admin_stats {
     # Reports assigned to third party
     my $external = $c->model('DB::Problem')->search( { state => 'external', %optional_params } )->count;
     # Reports moderated within 1 day
-    my $moderated = $c->model('DB::Problem')->search( { extra => { like => '%moderated_overdue,I1:0%' }, %optional_params } )->count;
+    my $moderated = $c->model('DB::Problem')->search( { extra => { '@>' => '{"moderated_overdue":0}' }, %optional_params } )->count;
     # Reports solved within 5 days (sent back from subdiv)
-    my $subdiv_dealtwith = $c->model('DB::Problem')->search( { extra => { like => '%subdiv_overdue,I1:0%' }, %params } )->count;
+    my $subdiv_dealtwith = $c->model('DB::Problem')->search( { extra => { '@>' => '{"subdiv_overdue":0}' }, %params } )->count;
     # Reports solved within 5 days (marked as 'fixed - council', 'external', or 'hidden'
-    my $fixed_in_time = $c->model('DB::Problem')->search( { extra => { like => '%closed_overdue,I1:0%' }, %optional_params } )->count;
+    my $fixed_in_time = $c->model('DB::Problem')->search( { extra => { '@>' => '{"closed_overdue":0}' }, %optional_params } )->count;
     # Reports per category
     my $per_category = $c->model('DB::Problem')->search( \%params, {
         select   => [ 'category', { count => 'id' } ],
@@ -1221,16 +1232,16 @@ sub admin_stats {
         group_by => [ 'category' ],
     });
     # How many reports have had their category changed by a DM (wrong category chosen by user)
-    my $changed = $c->model('DB::Problem')->search( { extra => { like => '%changed_category,I1:1%' }, %params } )->count;
+    my $changed = $c->model('DB::Problem')->search( { extra => { '@>' => '{"changed_category":1}' }, %params } )->count;
     # pictures taken
     my $pictures_taken = $c->model('DB::Problem')->search( { photo => { '!=', undef }, %params } )->count;
     # pictures published
-    my $pictures_published = $c->model('DB::Problem')->search( { extra => { like => '%publish_photo%' }, %params } )->count;
+    my $pictures_published = $c->model('DB::Problem')->search( { extra => { '\?' => 'publish_photo' }, %params } )->count;
     # how many times was a telephone number provided
     # XXX => How many users have a telephone number stored
     # my $phone = $c->model('DB::User')->search( { phone => { '!=', undef } } )->count;
     # how many times was the email address confirmed
-    my $email_confirmed = $c->model('DB::Problem')->search( { extra => { like => '%email_confirmed%' }, %params } )->count;
+    my $email_confirmed = $c->model('DB::Problem')->search( { extra => { '\?' => 'email_confirmed' }, %params } )->count;
     # how many times was the name provided
     my $name = $c->model('DB::Problem')->search( { name => { '!=', '' }, %params } )->count;
     # how many times was the geolocation used vs. addresssearch
@@ -1355,7 +1366,7 @@ sub export_as_csv {
 sub problem_confirm_email_extras {
     my ($self, $report) = @_;
     my $confirmed_reports = $report->user->problems->search({
-        extra => { like => '%email_confirmed%' },
+        extra => { '\?' => 'email_confirmed' },
     })->count;
 
     $self->{c}->stash->{email_confirmed} = $confirmed_reports;
@@ -1419,6 +1430,21 @@ sub report_new_munge_before_insert {
     if ($report->user->flagged) {
         $report->non_public(1);
     }
+}
+
+sub report_on_private_contacts {
+    my ($self, $category) = @_;
+
+    return [ FixMyStreet::DB->resultset('Contact')->not_deleted->search({category => $category})->all ];
+}
+
+sub munge_around_filter_category_list {
+    my $self = shift;
+
+    my $c = $self->{c};
+
+    $c->stash->{prefill_category} = $c->get_param('prefill_category') if $c->get_param('prefill_category');
+    $c->stash->{prefill_description} = $c->get_param('prefill_description') if $c->get_param('prefill_description');
 }
 
 1;

@@ -52,3 +52,32 @@ $search-help-margin-desktop: -2em -1em 0 -1em;
 $search-help-header-font-size-desktop: 1.25em;
 
 $geolocation-link: $green;
+
+$front-main-color: $black;
+$front-main-color-desktop: $black;
+$postcodeform-background: transparent;
+$postcodeform-color: $primary_b;
+$postcodeform-color-desktop: $primary_b;
+
+$mobile-sticky-sidebar-button-menu-image: "menu-white";
+
+$button-border-radius: 0.25em;
+$button-padding-top: .55em;
+$button-padding-bottom: .55em;
+$button-padding-left: 1em;
+$button-padding-right: 1em;
+
+$button-primary-bg-top: $primary;
+$button-primary-bg-bottom: $primary;
+$button-primary-border: $primary;
+$button-primary-text: $white;
+
+$button-primary-hover-bg-top: darken($green, 5%);
+$button-primary-hover-bg-bottom:darken($green, 5%);
+$button-primary-hover-border: darken($green, 5%);
+$button-primary-hover-text: $white;
+
+$button-primary-focus-bg-top: $primary;
+$button-primary-focus-bg-bottom: $primary;
+$button-primary-focus-border: $primary;
+$button-primary-focus-text: $white;

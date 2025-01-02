@@ -37,7 +37,7 @@ create table users (
     facebook_id     bigint  unique,
     oidc_ids        text    ARRAY,
     area_ids        integer ARRAY,
-    extra           text
+    extra           jsonb
 );
 CREATE UNIQUE INDEX users_email_verified_unique ON users (email) WHERE email_verified;
 CREATE UNIQUE INDEX users_phone_verified_unique ON users (phone) WHERE phone_verified;
@@ -58,6 +58,7 @@ create table body (
     jurisdiction text,
     api_key      text,
     send_method  text,
+    cobrand      text,
     send_comments boolean not null default 'f',
     comment_user_id int references users(id),
     suppress_alerts boolean not null default 'f',
@@ -67,8 +68,9 @@ create table body (
     blank_updates_permitted boolean not null default 'f',
     convert_latlong boolean not null default 'f',
     deleted boolean not null default 'f',
-    extra           text
+    extra jsonb
 );
+CREATE INDEX body_cobrand_idx ON body(cobrand);
 
 create table body_areas (
     body_id integer not null references body(id),
@@ -86,7 +88,7 @@ create table roles (
     body_id         integer not null references body(id) ON DELETE CASCADE,
     name            text,
     permissions     text ARRAY,
-    extra           text,
+    extra           jsonb,
     unique(body_id, name)
 );
 
@@ -119,7 +121,7 @@ create table contacts (
     note text not null,
 
     -- extra fields required for open311
-    extra text,
+    extra jsonb,
 
     -- for things like missed bin collections
     non_public boolean default 'f',
@@ -222,11 +224,19 @@ create table problem (
     lastupdate timestamp not null default current_timestamp,
     whensent timestamp,
     send_questionnaire boolean not null default 't',
-    extra text, -- extra fields required for open311
+    extra jsonb,
     flagged boolean not null default 'f',
-    geocode bytea,
+    geocode jsonb,
     response_priority_id int REFERENCES response_priorities(id),
 
+    send_state text not null default 'unprocessed' check (
+        send_state = 'unprocessed'
+        or send_state = 'processing'
+        or send_state = 'processed'
+        or send_state = 'skipped'
+        or send_state = 'sent'
+        or send_state = 'acknowledged'
+    ),
     -- logging sending failures (used by webservices)
     send_fail_count integer not null default 0,
     send_fail_reason text,
@@ -249,10 +259,12 @@ create table problem (
     -- subcategory to enable filtering in reporting --
     subcategory text
 );
+create index problem_created_idx on problem(created);
 create index problem_state_latitude_longitude_idx on problem(state, latitude, longitude);
 create index problem_user_id_idx on problem ( user_id );
 create index problem_external_id_idx on problem(external_id);
 create index problem_external_body_idx on problem(lower(external_body));
+create index problem_send_state_state_idx on problem(send_state, state) WHERE state NOT IN ('unconfirmed', 'hidden', 'partial');
 create index problem_radians_latitude_longitude_idx on problem(radians(latitude), radians(longitude));
 create index problem_bodies_str_array_idx on problem USING gin(regexp_split_to_array(bodies_str, ','));
 create index problem_fulltext_idx on problem USING GIN(
@@ -359,9 +371,10 @@ create table comment (
     -- other fields? one to indicate whether this was written by the council
     -- and should be highlighted in the display?
     external_id text,
-    extra text,
+    extra jsonb,
     send_state text not null default 'unprocessed' check (
         send_state = 'unprocessed'
+        or send_state = 'processing'
         or send_state = 'processed'
         or send_state = 'skipped'
         or send_state = 'sent'
@@ -388,7 +401,7 @@ create index comment_fulltext_idx on comment USING GIN(
 create table token (
     scope text not null,
     token text not null,
-    data bytea not null,
+    data jsonb not null,
     created timestamp not null default current_timestamp,
     primary key (scope, token)
 );
@@ -506,7 +519,7 @@ create table moderation_original_data (
     -- Metadata
     created timestamp not null default current_timestamp,
 
-    extra text,
+    extra jsonb,
     category text,
     latitude double precision,
     longitude double precision
@@ -559,7 +572,7 @@ CREATE TABLE defect_types (
     body_id int references body(id) not null,
     name text not null,
     description text not null,
-    extra text,
+    extra jsonb,
     unique(body_id, name)
 );
 
@@ -587,7 +600,7 @@ CREATE TABLE report_extra_fields (
     name text not null,
     cobrand text,
     language text,
-    extra text
+    extra jsonb
 );
 
 CREATE TABLE state (
@@ -604,5 +617,7 @@ CREATE TABLE manifest_theme (
     short_name text not null,
     background_colour text,
     theme_colour text,
-    images text ARRAY
+    images text ARRAY,
+    wasteworks_name text,
+    wasteworks_short_name text
 );

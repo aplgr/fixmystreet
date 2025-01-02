@@ -187,11 +187,12 @@ $.extend(fixmystreet.utils, {
             lonlat = new OpenLayers.LonLat(lonlat.lon, lonlat.lat);
         }
 
+        var draggable = !$("html").hasClass("mobile");
         if (fixmystreet.page == 'new') {
-            /* Already have a pin */
+            fixmystreet.markers.features[0].attributes.draggable = draggable;
             fixmystreet.markers.features[0].move(lonlat);
         } else {
-            var markers = fixmystreet.maps.markers_list( [ [ lonlat.lat, lonlat.lon, fixmystreet.pin_new_report_colour ] ], false );
+            var markers = fixmystreet.maps.markers_list( [ [ lonlat.lat, lonlat.lon, fixmystreet.pin_new_report_colour, undefined, undefined, undefined, draggable ] ], false );
             fixmystreet.bbox_strategy.layer.protocol.abort(fixmystreet.bbox_strategy.response);
             fixmystreet.bbox_strategy.deactivate();
             fixmystreet.markers.removeAllFeatures();
@@ -233,7 +234,7 @@ $.extend(fixmystreet.utils, {
             }
             var id = pin[3] === undefined ? pin[3] : +pin[3];
             var marker_size = (id === window.selected_problem_id) ? selected_size : size;
-            var draggable = (id === window.selected_problem_id) ? true : (pin[6] === false ? false : true);
+            var draggable = (id && id === window.selected_problem_id) ? true : (pin[6] === false ? false : true);
             var marker = new OpenLayers.Feature.Vector(loc, {
                 colour: pin[2],
                 size: pin[5] || marker_size,
@@ -404,14 +405,14 @@ $.extend(fixmystreet.utils, {
       },
 
       setup_geolocation: function() {
-          if (!OpenLayers.Control.Geolocate || !fixmystreet.map ||
-              !fixmystreet.utils || !fixmystreet.utils.parse_query_string ||
-              fixmystreet.utils.parse_query_string().geolocate !== '1'
-          ) {
+          if (!OpenLayers.Control.Geolocate || !fixmystreet.map) {
               return;
           }
 
           var layer;
+          var control;
+          var recentre_on_location = false;
+          var last_location;
 
           function createCircleOfUncertainty(e) {
               var loc = new OpenLayers.Geometry.Point(e.point.x, e.point.y);
@@ -452,6 +453,8 @@ $.extend(fixmystreet.utils, {
           }
 
           function updateGeolocationMarker(e) {
+              last_location = new OpenLayers.LonLat(e.point.x, e.point.y);
+
               if (!layer) {
                   addGeolocationLayer(e);
               } else {
@@ -479,18 +482,49 @@ $.extend(fixmystreet.utils, {
                   // element.
 
                   // Don't forget to update the position of the GPS marker.
-                  marker.move(new OpenLayers.LonLat(e.point.x, e.point.y));
+                  marker.move(last_location);
+              }
+
+              if (recentre_on_location) {
+                fixmystreet.map.setCenter(last_location);
+                recentre_on_location = false;
+                $(".js-recentre-map").removeClass("loading");
               }
           }
 
-          var control = new OpenLayers.Control.Geolocate({
-              bind: false, // Don't want the map to pan to each location
-              watch: true,
-              enableHighAccuracy: true
+          function addControlToMap() {
+            if (control) {
+                return;
+            }
+            control = new OpenLayers.Control.Geolocate({
+                bind: false, // Don't want the map to pan to each location
+                watch: true,
+                enableHighAccuracy: true
+            });
+            control.events.register("locationupdated", null, updateGeolocationMarker);
+            fixmystreet.map.addControl(control);
+            control.activate();
+          }
+
+          if (fixmystreet.utils && fixmystreet.utils.parse_query_string &&
+              fixmystreet.utils.parse_query_string().geolocate === '1') {
+                // loading a page with geolocate=1 in the query string so add
+                // and activate the control immediately
+                addControlToMap();
+          }
+
+          $(".js-recentre-map").click(function() {
+            if (last_location) {
+                // if we've already got a geolocation centre the map there
+                fixmystreet.map.setCenter(last_location);
+            } else {
+                // otherwise, set up the geolocation control and set the flag
+                // to centre the map the first time we get a location.
+                $(".js-recentre-map").addClass("loading");
+                recentre_on_location = true;
+                addControlToMap();
+            }
           });
-          control.events.register("locationupdated", null, updateGeolocationMarker);
-          fixmystreet.map.addControl(control);
-          control.activate();
       },
       toggle_base: function(e) {
           e.preventDefault();
@@ -735,7 +769,7 @@ $.extend(fixmystreet.utils, {
                     // Look at original href here to know if location was present at load.
                     // If it was, we don't want to zoom out to the bounds of the area.
                     var qs = OpenLayers.Util.getParameters(fixmystreet.original.href);
-                    if (!qs.bbox && !qs.lat && !qs.lon) {
+                    if (!qs.bbox && !qs.lat && !qs.lon && !qs.pc) {
                         zoomToBounds(extent);
                     }
                 } else {
@@ -766,12 +800,12 @@ $.extend(fixmystreet.utils, {
         });
         pin_layer_style_map.addUniqueValueRules('default', 'size', {
             'normal': {
-                externalGraphic: fixmystreet.pin_prefix + "pin-${colour}.png",
+                externalGraphic: "/i/pins/${colour}/pin.png",
                 graphicWidth: 48,
                 graphicHeight: 64,
                 graphicXOffset: -24,
                 graphicYOffset: -64,
-                backgroundGraphic: fixmystreet.pin_prefix + "pin-shadow.png",
+                backgroundGraphic: fixmystreet.pin_prefix + "shadow/pin.png",
                 backgroundWidth: 60,
                 backgroundHeight: 30,
                 backgroundXOffset: -7,
@@ -779,24 +813,24 @@ $.extend(fixmystreet.utils, {
                 popupYOffset: -40
             },
             'big': {
-                externalGraphic: fixmystreet.pin_prefix + "pin-${colour}-big.png",
+                externalGraphic: "/i/pins/${colour}/big.png",
                 graphicWidth: 78,
                 graphicHeight: 105,
                 graphicXOffset: -39,
                 graphicYOffset: -105,
-                backgroundGraphic: fixmystreet.pin_prefix + "pin-shadow-big.png",
+                backgroundGraphic: fixmystreet.pin_prefix + "shadow/big.png",
                 backgroundWidth: 88,
                 backgroundHeight: 40,
                 backgroundXOffset: -10,
                 backgroundYOffset: -35
             },
             'small': {
-                externalGraphic: fixmystreet.pin_prefix + "pin-${colour}-small.png",
+                externalGraphic: "/i/pins/${colour}/small.png",
                 graphicWidth: 24,
                 graphicHeight: 32,
                 graphicXOffset: -12,
                 graphicYOffset: -32,
-                backgroundGraphic: fixmystreet.pin_prefix + "pin-shadow-small.png",
+                backgroundGraphic: fixmystreet.pin_prefix + "shadow/small.png",
                 backgroundWidth: 30,
                 backgroundHeight: 15,
                 backgroundXOffset: -4,
@@ -804,7 +838,7 @@ $.extend(fixmystreet.utils, {
                 popupYOffset: -20
             },
             'mini': {
-                externalGraphic: fixmystreet.pin_prefix + "pin-${colour}-mini.png",
+                externalGraphic: "/i/pins/${colour}/mini.png",
                 graphicWidth: 16,
                 graphicHeight: 20,
                 graphicXOffset: -8,
@@ -915,6 +949,11 @@ $.extend(fixmystreet.utils, {
         } else if (fixmystreet.page == 'new') {
             drag.activate();
         }
+
+        // Special heatmap check to not have a double pin load
+        if ($('input[name=heatmap]:checked').val() === 'Yes') {
+            fixmystreet.markers.setVisibility(false);
+        }
         fixmystreet.map.addLayer(fixmystreet.markers);
 
         if (fixmystreet.page == "report") {
@@ -940,9 +979,6 @@ $.extend(fixmystreet.utils, {
                 fixmystreet.markers.setVisibility(false);
                 fixmystreet.select_feature.deactivate();
                 $label.html(translation_strings.show_pins);
-            }
-            if (typeof ga !== 'undefined') {
-                ga('send', 'event', 'toggle-pins-on-map', 'click');
             }
         });
     }
@@ -1060,6 +1096,7 @@ OpenLayers.Control.PanZoomFMS = OpenLayers.Class(OpenLayers.Control.PanZoom, {
         btn.action = id;
         btn.className = "olButton";
         btn.tabIndex = "0";
+        btn.role = "button";
         this.div.appendChild(btn);
         this.buttons.push(btn);
         return btn;
@@ -1389,13 +1426,9 @@ OpenLayers.Control.Click = OpenLayers.Class(OpenLayers.Control, {
             return true;
         }
 
-        if (!$("html").hasClass("mobile")) {
+        if (!$("html").hasClass("map-reporting")) {
             var lonlat = fixmystreet.map.getLonLatFromViewPortPx(e.xy);
             fixmystreet.display.begin_report(lonlat);
-
-            if ( typeof ga !== 'undefined' && fixmystreet.cobrand == 'fixmystreet' ) {
-                ga('send', 'pageview', { 'page': '/map_click' } );
-            }
         }
     }
 });

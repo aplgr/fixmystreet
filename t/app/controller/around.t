@@ -1,3 +1,6 @@
+use FixMyStreet;
+BEGIN { FixMyStreet->test_mode(1); }
+
 package FixMyStreet::Map::Tester;
 
 use Moo;
@@ -29,13 +32,18 @@ foreach my $test (
     },
     {
         pc              => 'xxxxxxxxxxxxxxxxxxxxxxxxxxx',
-        errors          => ['Sorry, we could not find that location.'],
+        errors => [
+            'Error: Please enter a valid postcode or area',
+            'Sorry, we could not find that location.',
+        ],
         pc_alternatives => [],
     },
     {
         pc => 'Glenthorpe Ct, Katy, TX 77494, USA',
-        errors =>
-          ['Sorry, we could not find that location.'],
+        errors => [
+            'Error: Please enter a valid postcode or area',
+            'Sorry, we could not find that location.',
+        ],
         pc_alternatives => [],
     },
   )
@@ -129,7 +137,7 @@ subtest 'check lat/lng for Maidenhead code' => sub {
 
 my $body_edin = $mech->create_body_ok(2651, 'City of Edinburgh Council');
 my $body_edin_id = $body_edin->id;
-my $body_west = $mech->create_body_ok(2504, 'Westminster City Council', {}, { cobrand => 'westminster' });
+my $body_west = $mech->create_body_ok(2504, 'Westminster City Council', { cobrand => 'westminster' });
 
 my @edinburgh_problems = $mech->create_problems_for_body( 5, $body_edin_id, 'Around page', {
     postcode  => 'EH1 1BB',
@@ -257,7 +265,7 @@ subtest 'check assigned-only list items do not display shortlist buttons' => sub
 
 }; # End big override_config
 
-my $body = $mech->create_body_ok(2237, "Oxfordshire");
+my $body = $mech->create_body_ok(2237, "Oxfordshire", { cobrand => 'oxfordshire' });
 
 subtest 'check category, status and extra filtering works on /around' => sub {
     my $categories = [ 'Pothole', 'Vegetation', 'Flytipping' ];
@@ -462,14 +470,14 @@ subtest 'check show old reports checkbox shown on around page' => sub {
         MAPIT_URL => 'http://mapit.uk/',
     }, sub {
         $mech->get_ok( '/around?pc=OX20+1SZ' );
-        $mech->content_contains('id="show_old_reports_wrapper" class="report-list-filters hidden"');
+        $mech->content_like(qr/id="show_old_reports_wrapper"[^>]*report-list-filters hidden"/);
 
         my $problems = FixMyStreet::DB->resultset('Problem')->to_body( $body->id );
         $problems->first->update( { confirmed => \"current_timestamp-'7 months'::interval" } );
 
         $mech->get_ok( '/around?pc=OX20+1SZ&status=all' );
-        $mech->content_lacks('id="show_old_reports_wrapper" class="report-list-filters hidden"');
-        $mech->content_contains('id="show_old_reports_wrapper" class="report-list-filters"');
+        $mech->content_unlike(qr/id="show_old_reports_wrapper"[^>]*report-list-filters hidden"/);
+        $mech->content_like(qr/id="show_old_reports_wrapper"[^>]*report-list-filters"/);
 
         $problems->update( { confirmed => \"current_timestamp" } );
     };
@@ -513,10 +521,210 @@ subtest 'check map zoom level customisation' => sub {
     };
 };
 
-subtest 'check nearby lookup' => sub {
+subtest 'check nearby lookup, default behaviour' => sub {
     my $p = FixMyStreet::DB->resultset("Problem")->search({ external_body => "Pothole-confirmed" })->first;
     $mech->get_ok('/around/nearby?latitude=51.754926&longitude=-1.256179&filter_category=Pothole');
     $mech->content_contains('[51.754926,-1.256179,"yellow",' . $p->id . ',"Around page Test 1 for ' . $body->id . '","small",false]');
+};
+
+my $oxfordshire_cobrand = Test::MockModule->new('FixMyStreet::Cobrand::Oxfordshire');
+$oxfordshire_cobrand->mock('defect_wfs_query', sub { return { features => [] }; });
+
+subtest 'check nearby lookup, cobrand custom distances' => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => 'oxfordshire',
+        MAPIT_URL => 'http://mapit.uk/',
+        COBRAND_FEATURES => {
+            nearby_distances => { oxfordshire => {
+                inspector => 500,
+                suggestions => 100,
+            } },
+        }
+    }, sub {
+
+        $mech->delete_problems_for_body($body->id);
+        my ($p) = $mech->create_problems_for_body( 1, $body->id, 'Around page', {
+            postcode  => 'OX20 1SZ',
+            latitude  => 51.754926,
+            longitude => -1.256179,
+            category => "Pothole",
+        });
+        for my $test (
+            { lat => 51.7549, lon => -1.256, mode => undef, contains => 1}, # 12m away
+            { lat => 51.752, lon => -1.256, mode => undef, contains => 1}, # 325m away
+            { lat => 51.7485, lon => -1.256, mode => undef, contains => 1}, # 714m away
+            { lat => 51.74, lon => -1.256, mode => undef, contains => 0}, # 1660m away
+
+            { lat => 51.7549, lon => -1.256, mode => 'inspector', contains => 1}, # 12m away
+            { lat => 51.752, lon => -1.256, mode => 'inspector', contains => 1}, # 325m away
+            { lat => 51.7485, lon => -1.256, mode => 'inspector', contains => 0}, # 714m away
+            { lat => 51.74, lon => -1.256, mode => 'inspector', contains => 0}, # 1660m away
+
+            { lat => 51.7549, lon => -1.256, mode => 'suggestions', contains => 1}, # 12m away
+            { lat => 51.752, lon => -1.256, mode => 'suggestions', contains => 0}, # 325m away
+            { lat => 51.7485, lon => -1.256, mode => 'suggestions', contains => 0}, # 714m away
+            { lat => 51.74, lon => -1.256, mode => 'suggestions', contains => 0}, # 1660m away
+        ) {
+            $mech->get_ok( '/around/nearby?latitude=' . $test->{lat}
+                    . '&longitude=' . $test->{lon}
+                    . '&filter_category=Pothole'
+                    . ( $test->{mode} ? '&mode=' . $test->{mode} : '' )
+            );
+            $mech->contains_or_lacks($test->{contains}, '[51.754926,-1.256179,"yellow-cone",' . $p->id . ',"Open: Around page Test 1 for ' . $body->id . '","small",false]');
+        }
+    };
+};
+
+subtest 'check nearby lookup, cobrand custom distances per category' => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => 'oxfordshire',
+        MAPIT_URL => 'http://mapit.uk/',
+        COBRAND_FEATURES => {
+            nearby_distances => {
+                oxfordshire => {
+                    suggestions => {
+                        _fallback => 800,
+                        'Subcat 1 in Group 1' => 100,
+                        'Group 1' => 400,
+                        'No suggestions category' => 0,
+                    },
+                },
+            },
+        }
+    }, sub {
+        $mech->delete_problems_for_body($body->id);
+
+        my ($p_1_g_1) = $mech->create_problems_for_body( 1, $body->id, 'Around page', {
+            postcode  => 'OX20 1SZ',
+            latitude  => 51.754926,
+            longitude => -1.256179,
+            category => 'Subcat 1 in Group 1',
+        });
+        my ($p_2_g_1) = $mech->create_problems_for_body( 1, $body->id, 'Around page', {
+            postcode  => 'OX20 1SZ',
+            latitude  => 51.754926,
+            longitude => -1.256179,
+            category => 'Subcat 2 in Group 1',
+        });
+        my ($p_g_2) = $mech->create_problems_for_body( 1, $body->id, 'Around page', {
+            postcode  => 'OX20 1SZ',
+            latitude  => 51.754926,
+            longitude => -1.256179,
+            category => 'Subcat in Group 2',
+        });
+        $mech->create_problems_for_body( 1, $body->id, 'Around page', {
+            postcode  => 'OX20 1SZ',
+            latitude  => 51.754926,
+            longitude => -1.256179,
+            category => 'No suggestions category',
+        });
+
+        note 'filter_category = Subcat 1 in Group 1, filter_group = Group 1';
+        for my $test (
+            { lat => 51.7549, lon => -1.256, mode => 'suggestions', filter_category => 'Subcat 1 in Group 1', filter_group => 'Group 1', contains => 1}, # 12m away
+            { lat => 51.752, lon => -1.256, mode => 'suggestions', filter_category => 'Subcat 1 in Group 1', filter_group => 'Group 1', contains => 0}, # 325m away
+            { lat => 51.7485, lon => -1.256, mode => 'suggestions', filter_category => 'Subcat 1 in Group 1', filter_group => 'Group 1', contains => 0}, # 714m away
+            { lat => 51.74, lon => -1.256, mode => 'suggestions', filter_category => 'Subcat 1 in Group 1', filter_group => 'Group 1', contains => 0}, # 1660m away
+        ) {
+            $mech->get_ok( '/around/nearby?latitude=' . $test->{lat}
+                    . '&longitude=' . $test->{lon}
+                    . '&mode=' . $test->{mode}
+                    . '&filter_category=' . $test->{filter_category}
+                    . '&filter_group=' . $test->{filter_group} );
+            for my $test_p (
+                { id => $p_1_g_1->id, captured_by_category_filters => 1 },
+                { id => $p_2_g_1->id, captured_by_category_filters => 0 },
+                { id => $p_g_2->id,   captured_by_category_filters => 0 },
+            ) {
+                note '    Check for problem ' . $test_p->{id};
+                $mech->contains_or_lacks(
+                    $test->{contains} && $test_p->{captured_by_category_filters},
+                    '[51.754926,-1.256179,"yellow-cone",'
+                        . $test_p->{id}
+                        . ',"Open: Around page Test 1 for '
+                        . $body->id
+                        . '","small",false]'
+                );
+            }
+        }
+
+        # There is no config for 'Subcat 2 in Group 1' so it should fall back
+        # to the config for 'Group 1'
+        note 'filter_category = Subcat 2 in Group 1, filter_group = Group 1';
+        for my $test (
+            { lat => 51.7549, lon => -1.256, mode => 'suggestions', filter_category => 'Subcat 2 in Group 1', filter_group => 'Group 1', contains => 1}, # 12m away
+            { lat => 51.752, lon => -1.256, mode => 'suggestions', filter_category => 'Subcat 2 in Group 1', filter_group => 'Group 1', contains => 1}, # 325m away
+            { lat => 51.7485, lon => -1.256, mode => 'suggestions', filter_category => 'Subcat 2 in Group 1', filter_group => 'Group 1', contains => 0}, # 714m away
+            { lat => 51.74, lon => -1.256, mode => 'suggestions', filter_category => 'Subcat 2 in Group 1', filter_group => 'Group 1', contains => 0}, # 1660m away
+        ) {
+            $mech->get_ok( '/around/nearby?latitude=' . $test->{lat}
+                    . '&longitude=' . $test->{lon}
+                    . '&mode=' . $test->{mode}
+                    . '&filter_category=' . $test->{filter_category}
+                    . '&filter_group=' . $test->{filter_group} );
+            for my $test_p (
+                { id => $p_1_g_1->id, captured_by_category_filters => 0 },
+                { id => $p_2_g_1->id, captured_by_category_filters => 1 },
+                { id => $p_g_2->id,   captured_by_category_filters => 0 },
+            ) {
+                note '    Check for problem ' . $test_p->{id};
+                $mech->contains_or_lacks(
+                    $test->{contains} && $test_p->{captured_by_category_filters},
+                    '[51.754926,-1.256179,"yellow-cone",'
+                        . $test_p->{id}
+                        . ',"Open: Around page Test 1 for '
+                        . $body->id
+                        . '","small",false]'
+                );
+            }
+        }
+
+        # There is no config for 'Subcat in Group 2' or 'Group 2', so should
+        # fall back to the default for the cobrand
+        note 'filter_category = Subcat in Group 2, filter_group = Group 2';
+        for my $test (
+            { lat => 51.7549, lon => -1.256, mode => 'suggestions', filter_category => 'Subcat in Group 2', filter_group => 'Group 2', contains => 1}, # 12m away
+            { lat => 51.752, lon => -1.256, mode => 'suggestions', filter_category => 'Subcat in Group 2', filter_group => 'Group 2', contains => 1}, # 325m away
+            { lat => 51.7485, lon => -1.256, mode => 'suggestions', filter_category => 'Subcat in Group 2', filter_group => 'Group 2', contains => 1}, # 714m away
+            { lat => 51.74, lon => -1.256, mode => 'suggestions', filter_category => 'Subcat in Group 2', filter_group => 'Group 2', contains => 0}, # 1660m away
+        ) {
+            $mech->get_ok( '/around/nearby?latitude=' . $test->{lat}
+                    . '&longitude=' . $test->{lon}
+                    . '&mode=' . $test->{mode}
+                    . '&filter_category=' . $test->{filter_category}
+                    . '&filter_group=' . $test->{filter_group} );
+            for my $test_p (
+                { id => $p_1_g_1->id, captured_by_category_filters => 0 },
+                { id => $p_2_g_1->id, captured_by_category_filters => 0 },
+                { id => $p_g_2->id,   captured_by_category_filters => 1 },
+            ) {
+                note 'Check for problem ' . $test_p->{id};
+                $mech->contains_or_lacks(
+                    $test->{contains} && $test_p->{captured_by_category_filters},
+                    '[51.754926,-1.256179,"yellow-cone",'
+                        . $test_p->{id}
+                        . ',"Open: Around page Test 1 for '
+                        . $body->id
+                        . '","small",false]'
+                );
+            }
+        }
+
+        note 'filter_category = No suggestions category';
+        for my $test (
+            { lat => 51.754926, lon => -1.256179 }, # 0m away
+            { lat => 51.7549, lon => -1.256 }, # 12m away
+            { lat => 51.752, lon => -1.256 }, # 325m away
+            { lat => 51.7485, lon => -1.256 }, # 714m away
+            { lat => 51.74, lon => -1.256 }, # 1660m away
+        ) {
+            my $json = $mech->get_ok_json( '/around/nearby?latitude=' . $test->{lat}
+                    . '&longitude=' . $test->{lon}
+                    . '&mode=suggestions'
+                    . '&filter_category=No suggestions category' );
+            is_deeply $json, { pins => [] }, 'No suggestions category should not be shown';
+        }
+    };
 };
 
 my $he = Test::MockModule->new('HighwaysEngland');

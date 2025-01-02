@@ -1,14 +1,4 @@
-[% INCLUDE 'header.html', title => loc('Frequently Asked Questions'), bodyclass => 'twothirdswidthpage' %]
-
-<div class="sticky-sidebar">
-    <aside>
-        <ul class="plain-list">
-            <li><strong>Frequently Asked Questions</strong></li>
-            <li><a href="/privacy">Privacy and cookies</a></li>
-            <li><a href="https://www.rutland.gov.uk/my-council/contact-us/">Contact Rutland County Council</a></li>
-        </ul>
-    </aside>
-</div>
+[% INCLUDE 'header.html', title => loc('Frequently Asked Questions'), sidebar='about/_sidebar.html' %]
 
 <h1><a name="faq"></a>Frequently Asked Questions</h1>
 <dl>
@@ -135,6 +125,15 @@
             size of your screen.
         </p>
     </dd>
+
+    <dt>Is there an app I can download?</dt>
+    <dd>
+    <p>
+        Yes, see our <a href="/about/web-app">instructions on how to download
+            the [% c.cobrand.council_name %] reporting app</a>.
+    </p>
+    </dd>
+
 </dl>
 
 <dl>
@@ -169,4 +168,4 @@
 </p>
 <p>&nbsp;<p>
 
-[% INCLUDE 'footer.html' pagefooter = 'yes' %]
+[% INCLUDE 'footer.html' %]

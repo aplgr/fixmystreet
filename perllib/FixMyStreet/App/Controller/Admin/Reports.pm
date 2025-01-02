@@ -115,8 +115,14 @@ sub index : Path {
         my $updates = $c->cobrand->updates;
         $order = { -desc => 'me.id' };
         if ($valid_email) {
+            # If you naively put: 'user.email' => { ilike => $like_search },
+            # in the query, PostgreSQL 13 will perform a backwards primary key
+            # index scan and check each user as it goes, rather than looking up
+            # the users and using the comment's user_id index.
+            my $subselect = FixMyStreet::DB->resultset("User")->search(
+                { email => { ilike => $like_search } }, { columns => ['id'] });
             $query = [
-                'user.email' => { ilike => $like_search },
+                'user.id' => { -in => $subselect->as_query },
             ];
         } elsif ($valid_phone) {
             $query = [
@@ -246,6 +252,7 @@ sub edit : Path('/admin/report_edit') : Args(1) {
         }
 
         for my $key ( keys %$extra ) {
+            next if $key =~ /^(whensent_previous|rdi_processed|gender|variant|CyclingUK)/;
             push @fields, { name => $key, val => $extra->{$key} };
         }
 
@@ -303,7 +310,7 @@ sub edit : Path('/admin/report_edit') : Args(1) {
         if ($c->user->is_superuser) {
             $columns{flagged} = $c->get_param('flagged') ? 1 : 0;
         }
-        foreach (qw/state anonymous title detail name external_id external_body external_team/) {
+        foreach (qw/state anonymous title detail name external_id/) {
             $columns{$_} = $c->get_param($_);
         }
 
@@ -329,6 +336,9 @@ sub edit : Path('/admin/report_edit') : Args(1) {
         } else {
             $problem->unset_extra_metadata('closed_updates');
         }
+        if ($c->get_param('send_state') && ($c->get_param('send_state') ne $problem->send_state)) {
+            $problem->send_state($c->get_param('send_state'));
+        };
 
         $c->forward( '/admin/reports/edit_category', [ $problem, $problem->state ne $old_state ] );
         $c->forward('/admin/update_user', [ $problem ]);

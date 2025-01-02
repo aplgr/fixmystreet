@@ -10,6 +10,7 @@ use warnings;
 use base 'DBIx::Class::Core';
 __PACKAGE__->load_components(
   "FilterColumn",
+  "+FixMyStreet::DB::JSONBColumn",
   "FixMyStreet::InflateColumn::DateTime",
   "FixMyStreet::EncodedColumn",
 );
@@ -37,7 +38,7 @@ __PACKAGE__->add_columns(
   "note",
   { data_type => "text", is_nullable => 0 },
   "extra",
-  { data_type => "text", is_nullable => 1 },
+  { data_type => "jsonb", is_nullable => 1 },
   "non_public",
   { data_type => "boolean", default_value => \"false", is_nullable => 1 },
   "endpoint",
@@ -77,17 +78,15 @@ __PACKAGE__->has_many(
 );
 
 
-# Created by DBIx::Class::Schema::Loader v0.07035 @ 2019-04-25 12:06:39
-# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:f7XjQj4iABikbR4EZrjL3g
-
-__PACKAGE__->load_components("+FixMyStreet::DB::RABXColumn");
-__PACKAGE__->rabx_column('extra');
+# Created by DBIx::Class::Schema::Loader v0.07035 @ 2023-05-10 17:09:58
+# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:qlhcRuYTHueQNQ0jw7A7cQ
 
 use Moo;
 use namespace::clean -except => [ 'meta' ];
+use List::Util qw(any);
 
-with 'FixMyStreet::Roles::Extra',
-    'FixMyStreet::Roles::Translatable';
+with 'FixMyStreet::Roles::DB::Extra',
+    'FixMyStreet::Roles::DB::Translatable';
 
 __PACKAGE__->many_to_many( response_templates => 'contact_response_templates', 'response_template' );
 __PACKAGE__->many_to_many( response_priorities => 'contact_response_priorities', 'response_priority' );
@@ -111,6 +110,17 @@ __PACKAGE__->might_have(
 sub category_display {
     my $self = shift;
     $self->get_extra_metadata('display_name') || $self->translate_column('category');
+}
+
+=item category_safe
+
+This returns a safe category name, that can be passed to URI generation or similar.
+
+=cut
+
+sub category_safe {
+    my $self = shift;
+    return FixMyStreet::Template::SafeString->new($self->category);
 }
 
 # Returns an arrayref of groups this Contact is in; if it is
@@ -175,6 +185,12 @@ sub disable_form_field {
     my $metadata = $self->get_all_metadata;
     my ($field) = grep { $_->{code} eq '_fms_disable_' } @$metadata;
     return $field;
+}
+
+sub is_disabled {
+    my $self = shift;
+    my $metadata = $self->get_all_metadata;
+    return any { ($_->{disable_form} || '') eq 'true' } @$metadata;
 }
 
 sub sent_by_open311 {

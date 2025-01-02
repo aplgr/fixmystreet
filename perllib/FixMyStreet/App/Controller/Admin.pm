@@ -70,12 +70,12 @@ sub index : Path : Args(0) {
         }
     }
 
+    $c->stash->{edit_body_contacts} = 1
+        if grep { $_ eq 'body' } keys %{$c->stash->{allowed_pages}};
+
     my @unsent = $c->cobrand->problems->search( {
+        send_state => ['unprocessed', 'acknowledged'],
         'me.state' => [ FixMyStreet::DB::Result::Problem::open_states() ],
-        -or => {
-            whensent => undef,
-            send_fail_body_ids => { '!=', '{}' },
-        },
         bodies_str => { '!=', undef },
         # Ignore very recent ones that probably just haven't been sent yet
         confirmed => { '<', \"current_timestamp - '5 minutes'::interval" },
@@ -102,7 +102,7 @@ This admin page displays the overall configuration for the site.
 sub config_page : Path( 'config' ) : Args(0) {
     my ($self, $c) = @_;
     my $dir = FixMyStreet->path_to();
-    my $git_version = `cd $dir && git describe --tags`;
+    my $git_version = `cd $dir && git describe --tags 2>&1`;
     chomp $git_version;
     $c->stash(
         git_version => $git_version,
@@ -195,7 +195,7 @@ sub timeline : Path( 'timeline' ) : Args(0) {
 sub fetch_contacts : Private {
     my ( $self, $c ) = @_;
 
-    my $contacts = $c->stash->{body}->contacts->search(undef, { order_by => [ 'category' ] } );
+    my $contacts = $c->stash->{body}->contacts->order_by('category');
     $c->stash->{contacts} = $contacts;
     $c->stash->{live_contacts} = $contacts->not_deleted_admin;
     $c->stash->{any_not_confirmed} = $contacts->search({ state => 'unconfirmed' })->count;
@@ -270,7 +270,39 @@ sub update_edit : Path('update_edit') : Args(1) {
 
     $c->forward('check_username_for_abuse', [ $update->user ] );
 
-    if ( $c->get_param('submit') ) {
+    if ( $c->get_param('resend') ) {
+        $c->forward('/auth/check_csrf_token');
+
+        $update->send_state('unprocessed');
+        $update->whensent(undef);
+        $update->update();
+        $c->forward( 'log_edit',
+            [ $update->id, 'update', 'resend' ] );
+
+        $c->stash->{status_message} = _('Update will now be resent.');
+    }
+    elsif ( $c->get_param('mark_sent') ) {
+        $c->forward('/auth/check_csrf_token');
+
+        $update->send_state('sent');
+        $update->whensent( \'current_timestamp' );
+        $update->update();
+        $c->forward( 'log_edit',
+            [ $update->id, 'update', 'marked sent' ] );
+
+        $c->stash->{status_message} = _('Update has been marked as sent.');
+    }
+    elsif ( $c->get_param('mark_skip') ) {
+        $c->forward('/auth/check_csrf_token');
+
+        $update->send_state('skipped');
+        $update->update();
+        $c->forward( 'log_edit',
+            [ $update->id, 'update', 'mark skipped' ] );
+
+        $c->stash->{status_message} = _('Update has been marked to be skipped from sending.');
+    }
+    elsif ( $c->get_param('submit') ) {
         $c->forward('/auth/check_csrf_token');
 
         my $old_state = $update->state;
@@ -278,7 +310,7 @@ sub update_edit : Path('update_edit') : Args(1) {
 
         my $edited = 0;
 
-        # $update->name can be null which makes ne unhappy
+        # $update->name can be null which makes me unhappy
         my $name = $update->name || '';
 
         if ( $c->get_param('name') ne $name
@@ -329,7 +361,6 @@ sub update_edit : Path('update_edit') : Args(1) {
         }
 
     }
-
     return 1;
 }
 
@@ -587,10 +618,10 @@ sub update_extra_fields : Private {
             $meta->{required} = $c->get_param("metadata[$i].required") ? 'true' : 'false';
             $meta->{variable} = 'true';
             my $desc = $c->get_param("metadata[$i].description");
-            $meta->{description} = FixMyStreet::Template::sanitize($desc);
+            $meta->{description} = FixMyStreet::Template::sanitize($desc, 1);
             $meta->{datatype} = $c->get_param("metadata[$i].datatype");
 
-            if ( $meta->{datatype} eq "singlevaluelist" ) {
+            if ( $meta->{datatype} eq "singlevaluelist" || $meta->{datatype} eq "multivaluelist" ) {
                 $meta->{values} = [];
                 my $re = qr{^metadata\[$i\]\.values\[\d+\]\.key};
                 my @vindices = grep { /$re/ } keys %{ $c->req->params };
@@ -610,7 +641,7 @@ sub update_extra_fields : Private {
         } elsif ($behaviour eq 'notice') {
             $meta->{variable} = 'false';
             my $desc = $c->get_param("metadata[$i].description");
-            $meta->{description} = FixMyStreet::Template::sanitize($desc);
+            $meta->{description} = FixMyStreet::Template::sanitize($desc, 1);
             $meta->{disable_form} = $c->get_param("metadata[$i].disable_form") ? 'true' : 'false';
         } elsif ($behaviour eq 'hidden') {
             $meta->{automated} = 'hidden_field';
@@ -622,6 +653,28 @@ sub update_extra_fields : Private {
     }
     @extra_fields = sort { $a->{order} <=> $b->{order} } @extra_fields;
     $object->set_extra_fields(@extra_fields);
+}
+
+sub body_specific_page : Private {
+    my ( $self, $c, $load_all_action, $view_action ) = @_;
+
+    my $user = $c->user;
+
+    if ($user->is_superuser) {
+        $c->forward($load_all_action);
+    } elsif ( $user->from_body ) {
+        my $body_id = $user->from_body->id;
+        $body_id = $c->cobrand->call_hook(permission_body_override => [ $body_id ]) || [ $body_id ];
+        if (@$body_id > 1) {
+            $c->forward($load_all_action);
+            my %bodies = map { $_ => 1 } @$body_id;
+            $c->stash->{bodies} = [ grep { $bodies{$_->id} } @{$c->stash->{bodies}} ];
+        } else {
+            $c->res->redirect( $c->uri_for_action($view_action, $body_id) );
+        }
+    } else {
+        $c->detach( '/page_error_404_not_found' );
+    }
 }
 
 sub trim {

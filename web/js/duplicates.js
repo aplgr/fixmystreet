@@ -14,6 +14,10 @@
         }
 
         var category = $("#report_inspect_form [name=category]").val() || fixmystreet.reporting.selectedCategory().category;
+
+        // We check group also, in case that is provided in the config instead of subcat
+        var group = fixmystreet.reporting.selectedCategory().group;
+
         if (!category) {
             return;
         }
@@ -21,18 +25,20 @@
         var nearby_url;
         var url_params = {
             filter_category: category,
+            filter_group: group,
             latitude: $('input[name="latitude"]').val(),
             longitude: $('input[name="longitude"]').val()
         };
 
         if ( report_id ) {
             nearby_url = '/report/' + report_id + '/nearby.json';
-            url_params.distance = 1000; // Inspectors might want to see reports fairly far away (1000 metres)
+            url_params.mode = 'inspector'; // Inspectors might want to see reports fairly far away (default 1000 metres)
             url_params.pin_size = 'small'; // How it's always been
         } else {
             nearby_url = '/around/nearby';
-            url_params.distance = 250; // Only want to bother public with very nearby reports (250 metres)
+            url_params.mode = 'suggestions'; // Only want to bother public with very nearby reports (default 250 metres)
             url_params.pin_size = 'normal';
+            url_params.bodies = JSON.stringify(fixmystreet.bodies);
         }
 
         if ($('html').hasClass('mobile')) {

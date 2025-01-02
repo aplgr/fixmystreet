@@ -1,8 +1,8 @@
 [% INCLUDE 'header.html',
     title = 'Privacy policy',
-    bodyclass = 'twothirdswidthpage' %]
+    sidebar = 'about/_sidebar.html'
+%]
 
-[% INCLUDE 'about/_sidebar.html' %]
 
 [% contact_us_href = '/contact' %]
 
@@ -158,6 +158,9 @@ When you make a report
     [% END %]
     who adhere to strict data-handling policies, and to [% c.cobrand.council_name %] staff,
     who abide by their own data-handling and security policies.
+    [% IF c.cobrand.moniker == 'buckinghamshire' %]
+        <a href='https://www.buckinghamshire.gov.uk/your-council/privacy/privacy-information-for-specific-services/privacy-and-buckinghamshire-highways/'>Privacy and Buckinghamshire Highways</a>
+    [% END %]
 </p>
 
 [% IF c.cobrand.feature('updates_allowed') != 'staff' AND c.cobrand.send_questionnaires %]
@@ -236,6 +239,7 @@ When you make a report
         We <b>send you a questionnaire email</b> four weeks after you submit a problem, asking
         for a status update. You can then opt in or out of subsequent status update
         questionnaires.
+        You can choose to opt out of questionnaires altogether via <a href="/my">your account page</a>.
     </li>
   [% END %]
     <li>
@@ -501,4 +505,4 @@ can use.
 
 [% TRY %][% INCLUDE 'about/googlecookies.html' %][% CATCH file %][% END %]
 
-[% INCLUDE 'footer.html' pagefooter = 'yes' %]
+[% INCLUDE 'footer.html' %]

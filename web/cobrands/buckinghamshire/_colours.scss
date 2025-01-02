@@ -8,6 +8,7 @@
 $menu-image: 'menu-white';
 
 $bucks_indigo: #2C2D84;
+$bucks_light_indigo: #D7DCFE; //Created by SW for Bucks
 $bucks_charcoal: #3C3C3B;
 $bucks_grass_green: #9FC63B;
 $bucks_orange: #ED7004;
@@ -60,6 +61,12 @@ $search-help-background: #fff3f3;
 $search-help-header-font-size-desktop: 1.25em;
 
 $geolocation-link: $bucks_links;
+$front-main-color: $primary_b;
+$postcodeform-background: none;
+$front-main-color-desktop: $primary_b;
+$postcodeform-color: $primary_b;
+$postcodeform-color-desktop: $primary_b;
+
 
 @mixin bucks-button {
   background-color: $bucks_button_bg;
@@ -77,3 +84,5 @@ $geolocation-link: $bucks_links;
     background-color: $bucks_button_bg_hover;
   }
 }
+
+$mobile-sticky-sidebar-button-menu-image: "menu-white";

@@ -1,4 +1,3 @@
-use utf8;
 use FixMyStreet::TestMech;
 use FixMyStreet::Script::Alerts;
 
@@ -19,7 +18,7 @@ my $user3 =
   ->find_or_create( { email => 'bystander@example.com', name => 'Bystander' } );
 ok $user3, "created bystander";
 
-my $body = $mech->create_body_ok(2504, 'Westminster', {}, { cobrand => 'westminster' });
+my $body = $mech->create_body_ok(2504, 'Westminster', { cobrand => 'westminster' });
 
 my $dt = DateTime->new(
     year   => 2011,
@@ -293,6 +292,11 @@ foreach my $test (
         no_address  => 1,
         nearest     => '',
     },
+    {
+        desc        => 'null entry',
+        null        => 1,
+        nearest     => '',
+    },
 ) {
     subtest "correct Nearest Road text with $test->{desc}" => sub {
         $mech->clear_emails_ok;
@@ -305,7 +309,9 @@ foreach my $test (
         )->delete;
 
         my $g = $report->geocode;
-        if ( $test->{no_address} ) {
+        if ( $test->{null} ) {
+            $g = undef;
+        } elsif ( $test->{no_address} ) {
             $g->{resourceSets}[0]{resources}[0]{address} = undef;
         } else {
             $g->{resourceSets}[0]{resources}[0]{address}->{addressLine} = $test->{addressLine};
@@ -333,7 +339,7 @@ foreach my $test (
     };
 }
 
-my $hart = $mech->create_body_ok(2333, 'Hart', {}, { cobrand => 'hart' });
+my $hart = $mech->create_body_ok(2333, 'Hart', { cobrand => 'hart' });
 
 my $ward_alert = FixMyStreet::DB->resultset('Alert')->find_or_create(
     {
@@ -434,7 +440,8 @@ subtest "check alerts from cobrand send main site url for alerts for different c
     }, sub {
         FixMyStreet::Script::Alerts::send_other();
 
-        my $body = $mech->get_text_body_from_email;
+        my $email = $mech->get_email;
+        my $body = $mech->get_text_body_from_email($email);
 
         my $expected1 = FixMyStreet->config('BASE_URL') . '/report/' . $report_to_county_council->id;
         my $expected3 = FixMyStreet->config('BASE_URL') . '/report/' . $report_outside_district->id;
@@ -443,6 +450,10 @@ subtest "check alerts from cobrand send main site url for alerts for different c
         like $body, qr#$expected1#, 'non cobrand area report point to fixmystreet.com';
         like $body, qr#$expected2#, 'cobrand area report point to cobrand url';
         like $body, qr#$expected3#, 'report outside district report point to fixmystreet.com';
+
+        my $report_id = $report_to_council->id;
+        $body = $mech->get_html_body_from_email($email);
+        like $body, qr/Reference:&nbsp;$report_id/;
     };
 };
 

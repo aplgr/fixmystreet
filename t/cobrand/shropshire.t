@@ -1,4 +1,5 @@
 use CGI::Simple;
+use File::Temp 'tempdir';
 use Test::MockModule;
 use Test::MockTime qw(:all);
 use FixMyStreet::TestMech;
@@ -9,7 +10,7 @@ use Open311::PopulateServiceList;
 
 my $mech = FixMyStreet::TestMech->new;
 
-my $body = $mech->create_body_ok(2238, 'Shropshire Council', {}, { cobrand => 'shropshire' });
+my $body = $mech->create_body_ok(2238, 'Shropshire Council', { cobrand => 'shropshire' });
 $mech->create_contact_ok(body_id => $body->id, category => 'Bridges', email => 'bridges@example.org');
 
 my ($report) = $mech->create_problems_for_body(1, $body->id, 'Test Report', {
@@ -162,7 +163,6 @@ subtest 'check open311_contact_meta_override' => sub {
     };
     $processor->_current_service( { service_code => 100, service_name => 'Abandoned vehicle' } );
     $processor->_add_meta_to_contact( $contact );
-    $contact->discard_changes;
     my @extra_fields = $contact->get_extra_fields;
 
     is $extra_fields[0][0]->{fieldtype}, 'date', "added fieldtype 'date' to 'Abandoned since'";
@@ -170,16 +170,18 @@ subtest 'check open311_contact_meta_override' => sub {
     is $extra_fields[0][1]->{fieldtype}, undef, "not added fieldtype 'date' to 'Registration Mark'";
 };
 
+my $UPLOAD_DIR = tempdir( CLEANUP => 1 );
 FixMyStreet::override_config {
     MAPIT_URL => 'http://mapit.uk/',
     ALLOWED_COBRANDS => 'shropshire',
+    PHOTO_STORAGE_OPTIONS => { UPLOAD_DIR => $UPLOAD_DIR },
 }, sub {
     subtest 'Dashboard CSV adds column "Private" for "non_public" attribute' => sub {
         my $staffuser = $mech->create_user_ok('counciluser@example.com', name => 'Council User',
             from_body => $body, password => 'password');
 
         $mech->log_in_ok( $staffuser->email );
-        my $report = FixMyStreet::DB->resultset("Problem")->search(undef, { order_by => { -desc => 'id' } })->first;
+        my $report = FixMyStreet::DB->resultset("Problem")->order_by('-id')->first;
         $report->non_public(1);
         $report->update;
         $mech->get_ok('/dashboard?export=1');

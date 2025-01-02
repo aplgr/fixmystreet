@@ -10,6 +10,7 @@ use warnings;
 use base 'DBIx::Class::Core';
 __PACKAGE__->load_components(
   "FilterColumn",
+  "+FixMyStreet::DB::JSONBColumn",
   "FixMyStreet::InflateColumn::DateTime",
   "FixMyStreet::EncodedColumn",
 );
@@ -61,7 +62,9 @@ __PACKAGE__->add_columns(
   "external_id",
   { data_type => "text", is_nullable => 1 },
   "extra",
-  { data_type => "text", is_nullable => 1 },
+  { data_type => "jsonb", is_nullable => 1 },
+  "send_state",
+  { data_type => "text", default_value => "unprocessed", is_nullable => 0 },
   "send_fail_count",
   { data_type => "integer", default_value => 0, is_nullable => 0 },
   "send_fail_reason",
@@ -70,8 +73,6 @@ __PACKAGE__->add_columns(
   { data_type => "timestamp", is_nullable => 1 },
   "whensent",
   { data_type => "timestamp", is_nullable => 1 },
-  "send_state",
-  { data_type => "text", default_value => "unprocessed", is_nullable => 0 },
   "private_email_text",
   { data_type => "text", is_nullable => 1 },
 );
@@ -96,22 +97,19 @@ __PACKAGE__->belongs_to(
 );
 
 
-# Created by DBIx::Class::Schema::Loader v0.07035 @ 2022-03-29 14:20:23
-# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:x+v4WPYnfPF/ac+UBsPW9g
+# Created by DBIx::Class::Schema::Loader v0.07035 @ 2023-05-10 17:09:58
+# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:8R6NBLI7UWER4zQ6sM7G5Q
 #
-
-__PACKAGE__->load_components("+FixMyStreet::DB::RABXColumn");
-__PACKAGE__->rabx_column('extra');
 
 use Moo;
 use FixMyStreet::Template::SafeString;
 use namespace::clean -except => [ 'meta' ];
 use FixMyStreet::Template;
 
-with 'FixMyStreet::Roles::Abuser',
-     'FixMyStreet::Roles::Extra',
-     'FixMyStreet::Roles::Moderation',
-     'FixMyStreet::Roles::PhotoSet';
+with 'FixMyStreet::Roles::DB::Abuser',
+     'FixMyStreet::Roles::DB::Extra',
+     'FixMyStreet::Roles::DB::Moderation',
+     'FixMyStreet::Roles::DB::PhotoSet';
 
 =head2 FOREIGNBUILDARGS
 
@@ -297,7 +295,7 @@ sub meta_line {
             # use this meta data in preference to the user's from_body setting
             # in case they are no longer with the body, or have changed body.
             if (my $body_id = $self->get_extra_metadata('is_body_user')) {
-                $body = FixMyStreet::App->model('DB::Body')->find({id => $body_id})->name;
+                $body = FixMyStreet::DB->resultset('Body')->find({id => $body_id})->name;
             } else {
                 $body = $self->user->body;
             }
@@ -312,6 +310,9 @@ sub meta_line {
                 $body = 'Island Roads';
             } elsif ($body eq 'Thamesmead') {
                $body = 'Peabody';
+            } elsif ($body eq 'National Highways') {
+                # Always use what was saved on the comment
+                $body = FixMyStreet::Template::html_filter($self->name);
             }
         }
         my $cobrand_always_view_body_user = $cobrand->call_hook(always_view_body_contribute_details => $contributed_as);

@@ -10,7 +10,6 @@ my $body = $mech->create_body_ok( 2493, 'Royal Borough of Greenwich', {
     endpoint => 'endpoint',
     api_key => 'key',
     jurisdiction => 'greenwich',
-}, {
     cobrand => 'greenwich',
 });
 
@@ -34,16 +33,11 @@ my @reports = $mech->create_problems_for_body( 1, $body->id, 'Test', {
 });
 my $report = $reports[0];
 $report->geocode({
-    resourceSets => [ {
-        resources => [ {
-            name => 'Constitution Hill',
-            address => {
-                addressLine => 'Constitution Hill',
-                locality => 'London',
-                'formattedAddress' => 'Constitution Hill, London',
-            }
-        } ],
-    } ],
+    display_name => 'Constitution Hill, London',
+    address => {
+        road => 'Constitution Hill',
+        city => 'London',
+    },
 });
 $report->update;
 
@@ -89,6 +83,7 @@ subtest 'check services override' => sub {
     };
     $processor->_current_service( { service_code => 'HOLE' } );
     $processor->_add_meta_to_contact( $contact );
+    $contact->update;
 
     my $extra = [ {
         automated => 'server_set',
@@ -107,7 +102,6 @@ subtest 'check services override' => sub {
         description => 'How big is the pothole',
     } ];
 
-    $contact->discard_changes;
     is_deeply $contact->get_extra_fields, $extra, 'Easting has automated set';
 };
 

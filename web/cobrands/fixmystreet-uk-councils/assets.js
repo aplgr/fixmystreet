@@ -4,6 +4,10 @@ if (!fixmystreet.maps) {
     return;
 }
 
+function test_layer_typename(f, body, type) {
+    return f && f.body == body && f.http_options && f.http_options.params && f.http_options.params.TYPENAME == type;
+}
+
 // ArcGIS wants to receive the bounding box as a 'geometry' parameter, not 'bbox'
 var arcgis_format = new OpenLayers.Format.QueryStringFilter();
 OpenLayers.Protocol.ArcgisHTTP = OpenLayers.Class(OpenLayers.Protocol.HTTP, {
@@ -107,14 +111,23 @@ fixmystreet.assets.banes.lighting_asset_details = function() {
            "description: " + a.unitdescription;
 };
 
-fixmystreet.assets.banes.road_not_found = function(layer) {
-    var cat = fixmystreet.reporting.selectedCategory().category;
-    var asset_item = layer.fixmystreet.cat_map[cat];
-    if (asset_item) {
-        layer.fixmystreet.asset_item = asset_item;
-        fixmystreet.message_controller.road_not_found(layer);
-    } else {
+var banes_on_road;
+
+fixmystreet.assets.banes.road_actions = {
+    found: function(layer) {
         fixmystreet.message_controller.road_found(layer);
+        banes_on_road = true;
+    },
+    not_found: function(layer) {
+        var cat = fixmystreet.reporting.selectedCategory().category;
+        var asset_item = layer.fixmystreet.cat_map[cat];
+        if (asset_item) {
+            layer.fixmystreet.asset_item = asset_item;
+            fixmystreet.message_controller.road_not_found(layer);
+        } else {
+            fixmystreet.message_controller.road_found(layer);
+        }
+        banes_on_road = false;
     }
 };
 
@@ -134,7 +147,7 @@ var curo_categories = [
 
 fixmystreet.assets.banes.curo_found = function(layer) {
     var category = fixmystreet.reporting.selectedCategory().category;
-    if (curo_categories.indexOf(category) === -1) {
+    if (curo_categories.indexOf(category) === -1 || banes_on_road) {
         fixmystreet.message_controller.road_found(layer);
         return;
     }
@@ -163,6 +176,8 @@ fixmystreet.assets.bexley.streetlight_stylemap = new OpenLayers.StyleMap({
   'select': fixmystreet.assets.construct_named_select_style("${Unit_No}")
 });
 
+/* Brent */
+
 fixmystreet.assets.brent = {};
 
 // The label for street light markers should be everything after the final
@@ -190,11 +205,55 @@ fixmystreet.assets.brent.construct_asset_name = function(id) {
 };
 
 fixmystreet.assets.brent.found = function(layer) {
-    fixmystreet.message_controller.road_not_found(layer, function() {return true;});
+    fixmystreet.message_controller.road_found(layer);
 };
 
 fixmystreet.assets.brent.not_found = function(layer) {
+    fixmystreet.message_controller.road_not_found(layer, function() {return true;});
+};
+
+fixmystreet.assets.brent.road_found = function(layer) {
     fixmystreet.message_controller.road_found(layer);
+};
+
+fixmystreet.assets.brent.road_not_found = function(layer) {
+    if (brent_on_red_route()) {
+        fixmystreet.message_controller.road_found(layer);
+    } else {
+        fixmystreet.message_controller.road_not_found(layer);
+    }
+};
+
+function brent_on_red_route() {
+    var red_routes = fixmystreet.map.getLayersByName("Red Routes");
+    if (!red_routes.length) {
+        return false;
+    }
+    red_routes = red_routes[0];
+    return !!red_routes.selected_feature;
+}
+
+fixmystreet.assets.brent.cemetery_actions = {
+    found: function(layer) {
+        var currentCategory = fixmystreet.reporting.selectedCategory().category;
+        if (!fixmystreet.reporting_data || currentCategory === '') {
+            // Skip checks until category has been selected.
+            fixmystreet.message_controller.road_found(layer);
+            return;
+        }
+        var category = fixmystreet.reporting_data.by_category[currentCategory];
+
+        // If this category is non-TfL then disable reporting.
+        if (category.bodies.indexOf('TfL') === -1) {
+            // Need to pass a criterion function to force the not found message to be shown.
+            fixmystreet.message_controller.road_not_found(layer, function() { return true; });
+        } else {
+            fixmystreet.message_controller.road_found(layer);
+        }
+    },
+    not_found: function(layer) {
+        fixmystreet.message_controller.road_found(layer);
+    }
 };
 
 /* Bristol */
@@ -228,6 +287,36 @@ fixmystreet.assets.bromley.prow_stylemap = new OpenLayers.StyleMap({
         strokeWidth: 6
     })
 });
+
+fixmystreet.assets.bromley.found = function(layer) {
+    fixmystreet.message_controller.road_not_found(layer, function() {return true;});
+};
+
+fixmystreet.assets.bromley.not_found = function(layer) {
+    fixmystreet.message_controller.road_found(layer);
+};
+
+fixmystreet.assets.bromley.set_asset_owner = function() {
+    $('#form_fms_layer_owner').val('bromley');
+};
+
+fixmystreet.assets.bromley.unset_asset_owner = function() {
+    $('#form_fms_layer_owner').val('');
+};
+
+fixmystreet.assets.bromley.remove_park_message = function(layer) {
+    $('.js-bromley-park-message').remove();
+};
+
+fixmystreet.assets.bromley.add_park_message = function(layer) {
+    var $msg = $('<div class="box-warning js-bromley-park-message"></div>');
+    $msg.html(layer.fixmystreet.no_asset_message);
+    if ($('.js-bromley-park-message').length) {
+        $('.js-bromley-park-message').replaceWith($msg);
+    } else {
+        $msg.appendTo('.js-reporting-page--active .js-post-category-messages');
+    }
+};
 
 /* Buckinghamshire */
 
@@ -376,10 +465,7 @@ fixmystreet.assets.buckinghamshire.streetlight_asset_not_found = function() {
 function bucks_inspection_layer_loadend() {
     var type = 'junctions';
     var layer = fixmystreet.assets.layers.filter(function(elem) {
-        return elem.fixmystreet.body == "Buckinghamshire Council" &&
-        elem.fixmystreet.http_options &&
-        elem.fixmystreet.http_options.params &&
-        elem.fixmystreet.http_options.params.TYPENAME == type;
+        return test_layer_typename(elem.fixmystreet, "Buckinghamshire Council", type);
     });
     layer[0].checkSelected();
 }
@@ -404,26 +490,10 @@ if (fixmystreet.cobrand == 'buckinghamshire' || fixmystreet.cobrand == 'fixmystr
 }
 
 fixmystreet.assets.buckinghamshire.drains_construct_selected_asset_message = function(asset) {
-    var junctionInspectionLayer = window.fixmystreet.assets.layers.filter(function(elem) {
-        return elem.fixmystreet.body == "Buckinghamshire Council" &&
-        elem.fixmystreet.http_options.format.featureType == 'junction_inspections';
-    });
-    var inspection;
-    if (junctionInspectionLayer[0]) {
-        inspection = junctionInspectionLayer[0].features.filter(function(elem) {
-            return elem.attributes.asset_id == asset.attributes.asset_id &&
-            bucks_format_date(elem.attributes.created) == bucks_format_date(asset.attributes.last_inspected);
-        });
+    if (!asset.attributes.last_cleaned_date) {
+        return '';
     }
-    var last_clean = '';
-    var message = ' ';
-    if (inspection && inspection[0]) {
-        if (asset.attributes.last_inspected && inspection[0].attributes.junction_cleaned === 'true') {
-            last_clean = bucks_format_date(asset.attributes.last_inspected);
-            message = 'This gulley was last cleaned on ' + last_clean;
-        }
-    }
-    return message;
+    return 'This gulley was last cleaned on ' + bucks_format_date(asset.attributes.last_cleaned_date);
 };
 
 fixmystreet.assets.buckinghamshire.street_found = function(layer, feature) {
@@ -544,20 +614,39 @@ fixmystreet.assets.centralbedfordshire.streetlight_stylemap = new OpenLayers.Sty
     'select': fixmystreet.assets.construct_named_select_style("${lighting_c}")
 });
 
+fixmystreet.assets.centralbedfordshire.style_default_green = new OpenLayers.Style({
+    fillColor: "#55BB00",
+    fillOpacity: 0.6,
+    strokeColor: "#000000",
+    strokeOpacity: 0.8,
+    strokeWidth: 2,
+    pointRadius: 6
+});
+
+fixmystreet.assets.centralbedfordshire.tree_stylemap = new OpenLayers.StyleMap({
+    'default': fixmystreet.assets.centralbedfordshire.style_default_green,
+    'hover': fixmystreet.assets.style_default_hover,
+    'select': fixmystreet.assets.style_default_select
+});
+
 var centralbeds_types = [
     "CBC",
     "Fw",
 ];
 
-function cb_likely_trees_report() {
+function cb_should_not_require_road() {
     // Ensure the user can select anywhere on the map if they want to
-    // make a report in the "Trees" category. This means we don't show the
-    // "not found" message if no category/group has yet been selected
-    // or if only the group containing the "Trees" category has been
-    // selected.
+    // make a report in the "Trees", "Fly Tipping" or "Public Rights of way" categories.
+    // This means we don't show the "not found" message if no category/group has yet been selected
+    // or if one of the groups containing either the "Trees", "Fly Tipping" or "Public Rights of way"
+    // categories has been selected.
     var selected = fixmystreet.reporting.selectedCategory();
     return selected.category === "Trees" ||
             (selected.group === "Grass, Trees, Verges and Weeds" && !selected.category) ||
+            selected.category === "Fly Tipping" ||
+            (selected.group === "Flytipping, Bins and Graffiti" && !selected.category) ||
+            selected.category === 'Housing Fly-tipping' ||
+            selected.category === 'Public Rights of way' ||
             (!selected.group && !selected.category);
 }
 
@@ -588,7 +677,7 @@ fixmystreet.assets.centralbedfordshire.found = function(layer, feature) {
         if (OpenLayers.Util.indexOf(centralbeds_types, feature.attributes.adoption) != -1) {
             return true;
         }
-        if (cb_likely_trees_report()) {
+        if (cb_should_not_require_road()) {
             cb_show_non_stopper_message();
             return true;
         }
@@ -597,7 +686,7 @@ fixmystreet.assets.centralbedfordshire.found = function(layer, feature) {
 };
 fixmystreet.assets.centralbedfordshire.not_found = function(layer) {
     cb_hide_non_stopper_message();
-    if (cb_likely_trees_report()) {
+    if (cb_should_not_require_road()) {
         fixmystreet.message_controller.road_found(layer);
     } else {
         fixmystreet.message_controller.road_not_found(layer);
@@ -681,6 +770,19 @@ fixmystreet.assets.eastsussex.construct_selected_asset_message = function(asset)
         return message;
     }
 };
+
+/* Gloucestershire */
+
+fixmystreet.assets.gloucestershire = {};
+
+fixmystreet.assets.gloucestershire.street_stylemap = new OpenLayers.StyleMap({
+    'default': new OpenLayers.Style({
+        fill: false,
+        strokeColor: "navy",
+        strokeOpacity: 0.5,
+        strokeWidth: 8
+    })
+});
 
 /* Hounslow */
 
@@ -802,6 +904,20 @@ fixmystreet.assets.merton.streetlight_stylemap = new OpenLayers.StyleMap({
   'select': fixmystreet.assets.construct_named_select_style("${UnitNumber}")
 });
 
+merton_style_default_green = new OpenLayers.Style({
+    fillColor: "#55BB00",
+    strokeColor: "#000000",
+    strokeOpacity: 0.8,
+    strokeWidth: 4,
+    pointRadius: 12
+});
+
+fixmystreet.assets.merton.recyling_stylemap = new OpenLayers.StyleMap({
+    'default': merton_style_default_green,
+    'hover': fixmystreet.assets.style_default_hover,
+    'select': fixmystreet.assets.style_default_select
+});
+
 /* Northamptonshire */
 
 fixmystreet.assets.northamptonshire = {};
@@ -839,7 +955,7 @@ fixmystreet.assets.northamptonshire.asset_found = function(asset) {
 
 fixmystreet.assets.northamptonshire.asset_not_found = function() {
     $("#overlapping_features_msg").addClass('hidden');
-    if (this.fixmystreet.snap_threshold === 0) {
+    if (this.fixmystreet.snap_threshold === "0") {
         // Not a typo, asset selection is not mandatory
         fixmystreet.message_controller.asset_found.call(this);
     } else {
@@ -1003,10 +1119,7 @@ function occ_format_date(date_field) {
 function occ_inspection_layer_loadend() {
     var type = this.fixmystreet.http_options.params.TYPENAME.replace('_inspections', 's');
     var layer = fixmystreet.assets.layers.filter(function(elem) {
-        return elem.fixmystreet.body == "Oxfordshire County Council" &&
-        elem.fixmystreet.http_options &&
-        elem.fixmystreet.http_options.params &&
-        elem.fixmystreet.http_options.params.TYPENAME == type;
+        return test_layer_typename(elem.fixmystreet, "Oxfordshire County Council", type);
     });
     layer[0].checkSelected();
 }
@@ -1234,6 +1347,23 @@ fixmystreet.assets.peterborough.flytipping_leased_found = function() {
     $('#js-environment-message').removeClass('hidden');
 };
 
+fixmystreet.assets.peterborough.graffiti_pcc_found = function(layer) {
+    $("#js-graffiti-message").addClass("hidden");
+};
+fixmystreet.assets.peterborough.graffiti_pcc_not_found = function() {
+    for ( var i = 0; i < fixmystreet.assets.layers.length; i++ ) {
+        var layer = fixmystreet.assets.layers[i];
+        if ( layer.fixmystreet.name == 'Adopted Highways' && layer.selected_feature ) {
+            $('#js-graffiti-message').addClass('hidden');
+            return;
+        }
+    }
+    $('#js-graffiti-message').removeClass('hidden');
+};
+fixmystreet.assets.peterborough.graffiti_leased_found = function() {
+    $('#js-graffiti-message').removeClass('hidden');
+};
+
 /* Shropshire */
 
 fixmystreet.assets.shropshire = {};
@@ -1304,6 +1434,10 @@ fixmystreet.assets.shropshire.streetlight_stylemap = new OpenLayers.StyleMap({
 
 fixmystreet.assets.shropshire.streetlight_found = function(asset) {
     var controller_fn = shropshire_light(asset) ? 'asset_found' : 'asset_not_found';
+    if (asset.attributes.OWNER) {
+        this.fixmystreet.no_asset_msg_id = '#sl-owner-' + asset.attributes.FEAT_LABEL + asset.attributes.OWNER.replace(/[^a-zA-Z0-9]/g, '');
+        this.fixmystreet.no_asset_message = fixmystreet.assets.shropshire.streetlight_asset_message(asset);
+    }
     fixmystreet.message_controller[controller_fn].call(this);
     fixmystreet.assets.named_select_action_found.call(this, asset);
 };
@@ -1322,5 +1456,439 @@ fixmystreet.assets.shropshire.streetlight_asset_message = function(asset) {
     }
     return out;
 };
+
+/* Surrey */
+
+fixmystreet.assets.surrey = {};
+
+fixmystreet.assets.surrey.road_not_found = function(layer) {
+    var currentCategory = fixmystreet.reporting.selectedCategory().category;
+    if (!fixmystreet.reporting_data || currentCategory === '') {
+        // Skip checks until category has been selected.
+        fixmystreet.message_controller.road_found(layer);
+        return;
+    }
+    if (layer.fixmystreet.permissive_categories && layer.fixmystreet.permissive_categories.indexOf(fixmystreet.reporting.selectedCategory().category) !== -1) {
+        fixmystreet.message_controller.road_found(layer);
+    } else {
+        fixmystreet.message_controller.road_not_found(layer);
+    }
+};
+
+/* TfL */
+
+fixmystreet.assets.tfl = {};
+
+function tfl_check_bus_layer(layer, asset) {
+    var lonlat = asset.geometry.getBounds().getCenterLonLat();
+
+    var overlap_threshold = 1;
+    var overlapping_features = layer.getFeaturesWithinDistance(
+        new OpenLayers.Geometry.Point(lonlat.lon, lonlat.lat),
+        overlap_threshold
+    );
+    if (overlapping_features.length) {
+        layer.setAttributeFields(overlapping_features[0], true);
+    }
+}
+
+fixmystreet.assets.tfl.bus_attribute_set = function(asset) {
+    var other_layer;
+    if (this.name == 'TfL Bus Stops') {
+        other_layer = fixmystreet.map.getLayersByName("TfL Bus Shelters")[0];
+    } else if (this.name == 'TfL Bus Shelters') {
+        other_layer = fixmystreet.map.getLayersByName("TfL Bus Stops")[0];
+    }
+    if (!other_layer) {
+        return;
+    }
+    tfl_check_bus_layer(other_layer, asset);
+};
+
+fixmystreet.assets.tfl.asset_found = function(asset) {
+    fixmystreet.message_controller.asset_found.call(this, asset);
+    fixmystreet.assets.named_select_action_found.call(this, asset);
+};
+fixmystreet.assets.tfl.asset_not_found = function() {
+    fixmystreet.message_controller.asset_not_found.call(this);
+    fixmystreet.assets.named_select_action_not_found.call(this);
+};
+
+// Roadworks asset layer
+
+fixmystreet.assets.tfl.roadworks_stylemap = new OpenLayers.StyleMap({
+    'default': new OpenLayers.Style({
+        fillOpacity: 1,
+        fillColor: "#FFFF00",
+        strokeColor: "#000000",
+        strokeOpacity: 0.8,
+        strokeWidth: 2,
+        pointRadius: 6,
+        graphicWidth: 39,
+        graphicHeight: 25,
+        graphicOpacity: 1,
+        externalGraphic: '/cobrands/tfl/warning@2x.png'
+    }),
+    'hover': new OpenLayers.Style({
+        fillColor: "#55BB00",
+        externalGraphic: '/cobrands/tfl/warning-green@2x.png'
+    }),
+    'select': new OpenLayers.Style({
+        fillColor: "#55BB00",
+        externalGraphic: '/cobrands/tfl/warning-green@2x.png'
+    })
+});
+
+function tfl_to_ddmmyyyy(date) {
+    date = date.toISOString();
+    date = date.slice(8, 10) + '/' + date.slice(5, 7) + '/' + date.slice(0, 4);
+    return date;
+}
+
+fixmystreet.assets.tfl.roadworks_attribute_start = function() {
+    return tfl_to_ddmmyyyy(new Date(this.attributes.start_date));
+};
+fixmystreet.assets.tfl.roadworks_attribute_end = function() {
+    return tfl_to_ddmmyyyy(new Date(this.attributes.end_date));
+};
+
+fixmystreet.assets.tfl.roadworks_filter_value = function(feature) {
+    var red_routes = fixmystreet.map.getLayersByName("Red Routes");
+    if (!red_routes.length) {
+        return false;
+    }
+    red_routes = red_routes[0];
+
+    var point = feature.geometry;
+    var relevant = !!red_routes.getFeatureAtPoint(point);
+    if (!relevant) {
+        var nearest = red_routes.getFeaturesWithinDistance(point, 10);
+        relevant = nearest.length > 0;
+    }
+    return relevant;
+};
+
+fixmystreet.assets.tfl.roadworks_asset_found = function(feature) {
+    this.fixmystreet.actions.asset_not_found.call(this);
+    feature.layer = this;
+    var attr = feature.attributes,
+        start = tfl_to_ddmmyyyy(new Date(attr.start_date)),
+        end = tfl_to_ddmmyyyy(new Date(attr.end_date)),
+        summary = attr.summary,
+        desc = attr.description;
+
+    var $msg = $('<div class="js-roadworks-message js-roadworks-message-' + this.id + ' box-warning"></div>');
+    var $dl = $("<dl></dl>").appendTo($msg);
+    if (attr.promoter) {
+        $dl.append("<dt>Responsibility</dt>");
+        $dl.append($("<dd></dd>").text(attr.promoter));
+    }
+    $dl.append("<dt>Summary</dt>");
+    $dl.append($("<dd></dd>").text(summary));
+    if (desc) {
+        $dl.append("<dt>Description</dt>");
+        $dl.append($("<dd></dd>").text(desc));
+    }
+    $dl.append("<dt>Dates</dt>");
+    var $dates = $("<dd></dd>").appendTo($dl);
+    $dates.text(start + " until " + end);
+    $msg.prependTo('#js-post-category-messages');
+};
+
+fixmystreet.assets.tfl.roadworks_asset_not_found = function() {
+    $(".js-roadworks-message-" + this.id).remove();
+};
+
+/* Red routes (TLRN) asset layer & handling for disabling form when red route
+   is not selected for specific categories.
+   This comes after the point assets so that any asset is deselected by the
+   time the check for the red-route only categories is run.
+ */
+
+fixmystreet.assets.tfl.tlrn_stylemap = new OpenLayers.StyleMap({
+    'default': new OpenLayers.Style({
+        fillColor: "#ff0000",
+        fillOpacity: 0.3,
+        strokeColor: "#ff0000",
+        strokeOpacity: 1,
+        strokeWidth: 2
+    })
+});
+
+/*
+    Reports in these categories can only be made on a red route.
+    NOTE: This must be kept in sync with the list in the TfL cobrand module.
+*/
+var tlrn_categories = [
+    "All out - three or more street lights in a row",
+    "Blocked drain",
+    "Damage - general (Trees)",
+    "Dead animal in the carriageway or footway",
+    "Debris in the carriageway",
+    "Drain Cover - Missing or Damaged",
+    "Fallen Tree",
+    "Flooding",
+    "Graffiti / Flyposting (non-offensive)",
+    "Graffiti / Flyposting (offensive)",
+    "Graffiti / Flyposting on street light (non-offensive)",
+    "Graffiti / Flyposting on street light (offensive)",
+    "Graffiti / Flyposting – Political or Anti-Vaccination",
+    "Grass Cutting and Hedges",
+    "Hoarding complaint",
+    "Light on during daylight hours",
+    "Lights out in Pedestrian Subway",
+    "Low hanging branches",
+    "Manhole Cover - Damaged (rocking or noisy)",
+    "Manhole Cover - Missing",
+    "Mobile Crane Operation",
+    "Other (TfL)",
+    "Overgrown vegetation",
+    "Pavement Defect (uneven surface / cracked paving slab)",
+    "Pavement Overcrowding",
+    "Pothole (major)",
+    "Pothole (minor)",
+    "Roadworks",
+    "Scaffold complaint",
+    "Single Light out (street light)",
+    "Standing water",
+    "Street Light - Equipment damaged, pole leaning",
+    "Streetspace Feedback",
+    "Unstable hoardings",
+    "Unstable scaffolding",
+    "Worn out road markings"
+];
+
+function is_tlrn_category_only(category, bodies) {
+    return OpenLayers.Util.indexOf(tlrn_categories, category) > -1 &&
+        OpenLayers.Util.indexOf(bodies, 'TfL') > -1 &&
+        bodies.length <= 1;
+}
+
+var a13dbfo_categories = tlrn_categories.concat([
+    "Flytipping (TfL)",
+    "Graffiti / Flyposting on traffic light (non-offensive)",
+    "Graffiti / Flyposting on traffic light (offensive)"
+]);
+
+function is_a13dbfo_category(category, bodies) {
+    return OpenLayers.Util.indexOf(a13dbfo_categories, category) > -1 &&
+        OpenLayers.Util.indexOf(bodies, 'TfL') > -1 &&
+        bodies.length <= 1;
+}
+
+fixmystreet.assets.tfl.red_routes_not_found = function(layer) {
+    // Only care about this on TfL cobrand
+    if (fixmystreet.cobrand !== 'tfl') {
+        return;
+    }
+    var category = fixmystreet.reporting.selectedCategory().category;
+    if (is_tlrn_category_only(category, fixmystreet.bodies)) {
+        fixmystreet.message_controller.road_not_found(layer);
+    } else {
+        fixmystreet.message_controller.road_found(layer);
+    }
+};
+
+$(function(){
+    var layer = fixmystreet.map.getLayersByName('Red Routes')[0];
+    if (layer) {
+        layer.events.register( 'loadend', layer, function(){
+            // The roadworks layer may have finished loading before this layer, so
+            // ensure the filters to only show markers that intersect with a red route
+            // are re-applied.
+            var roadworks = fixmystreet.map.getLayersByName("Roadworks");
+            if (roadworks.length) {
+                // .redraw() reapplies filters without issuing any new requests
+                roadworks[0].redraw();
+            }
+        });
+    }
+    // One of the bus stop/shelter layers could have loaded before the other,
+    // and a feature auto-selected already, and we need the data from both
+    // layers, so make sure we poke it after the second layer loads
+    layers = fixmystreet.map.getLayersByName(/TfL Bus/);
+    $.each(layers, function(i, layer) {
+        layer.events.register( 'loadend', layer, function(){
+            var feature = fixmystreet.assets.selectedFeature();
+            if (feature) {
+                tfl_check_bus_layer(this, feature);
+            }
+        });
+    });
+});
+
+fixmystreet.assets.tfl.a13_found = function(layer) {
+    // Only care about this on TfL cobrand
+    if (fixmystreet.cobrand !== 'tfl') {
+        return;
+    }
+    // "Other (TfL)" has a stopper message set in the admin"
+    $('#js-category-stopper').remove();
+    var category = fixmystreet.reporting.selectedCategory().category;
+    if (is_a13dbfo_category(category, fixmystreet.bodies)) {
+        fixmystreet.message_controller.road_not_found(layer);
+        var body = new RegExp('&body=.*');
+        ($('#a13dbfolink').attr('href', $('#a13dbfolink').attr('href').replace(body, '&body=' +  encodeURIComponent(window.location.href))));
+    } else {
+        fixmystreet.message_controller.road_found(layer);
+    }
+};
+
+/* Thamesmead */
+
+fixmystreet.assets.thamesmead = {};
+fixmystreet.assets.thamesmead.streetlight_stylemap = new OpenLayers.StyleMap({
+  'default': fixmystreet.assets.style_default,
+  'hover': fixmystreet.assets.style_default_hover,
+  'select': fixmystreet.assets.construct_named_select_style("${feature_id}")
+});
+
+/* Westminster */
+
+fixmystreet.assets.westminster = {};
+
+/* First let us set up some necessary subclasses */
+
+/* This layer is relevant depending upon the category *and* the choice of the 'type' Open311 extra attribute question */
+var SubcatMixin = OpenLayers.Class({
+    relevant: function() {
+        var relevant = OpenLayers.Layer.VectorAsset.prototype.relevant.apply(this, arguments),
+            subcategories = this.fixmystreet.subcategories,
+            subcategory = $(this.fixmystreet.subcategory_id).val(),
+            relevant_sub = OpenLayers.Util.indexOf(subcategories, subcategory) > -1;
+        return relevant && relevant_sub;
+    },
+    CLASS_NAME: 'SubcatMixin'
+});
+OpenLayers.Layer.VectorAssetWestminsterSubcat = OpenLayers.Class(OpenLayers.Layer.VectorAsset, SubcatMixin, {
+    CLASS_NAME: 'OpenLayers.Layer.VectorAssetWestminsterSubcat'
+});
+OpenLayers.Layer.VectorAssetWestminsterSubcatUPRN = OpenLayers.Class(OpenLayers.Layer.VectorAssetMove, SubcatMixin, {
+    CLASS_NAME: 'OpenLayers.Layer.VectorAssetWestminsterSubcatUPRN'
+});
+
+function westminster_uprn_sort(a, b) {
+    a = a.attributes.ADDRESS;
+    b = b.attributes.ADDRESS;
+    var a_flat = a.match(/^(Flat|Unit)s? (\d+)/);
+    var b_flat = b.match(/^(Flat|Unit)s? (\d+)/);
+    if (a_flat && b_flat && a_flat[1] === b_flat[1]) {
+        return a_flat[2] - b_flat[2];
+    }
+    return a.localeCompare(b);
+}
+
+var westminster_old_uprn;
+
+function westminster_add_to_uprn_select($select, assets) {
+    assets.sort(westminster_uprn_sort);
+    $.each(assets, function(i, f) {
+        $select.append('<option value="' + f.attributes.UPRN + '">' + f.attributes.ADDRESS + '</option>');
+    });
+    if (westminster_old_uprn && $select.find('option[value=\"' + westminster_old_uprn + '\"]').length) {
+        $select.val(westminster_old_uprn);
+    }
+}
+
+function westminster_construct_uprn_select(assets, has_children) {
+    westminster_old_uprn = $('#uprn').val();
+    $('.category_meta_message').html('');
+    var $div = $("#uprn_select");
+    if (!$div.length) {
+        $div = $('<div data-page-name="uprn" class="js-reporting-page extra-category-questions" id="uprn_select"></div>');
+        $div.insertBefore('.js-reporting-page[data-page-name="photo"]');
+    }
+    $div.removeClass('js-reporting-page--skip');
+    if (assets.length > 1 || has_children) {
+        $div.empty();
+        $div.append('<label for="uprn">Please choose a property:</label>');
+        var $select = $('<select id="uprn" class="form-control" name="UPRN" required>');
+        $select.append('<option value="">---</option>');
+        westminster_add_to_uprn_select($select, assets);
+        $div.append($select);
+    } else {
+        $div.html('You have selected <b>' + assets[0].attributes.ADDRESS + '</b>');
+    }
+    $div.append("<button class='btn btn--block btn--final js-reporting-page--next'>Continue</button>");
+}
+
+fixmystreet.assets.westminster.uprn_asset_found = function(asset) {
+    if (fixmystreet.message_controller.asset_found.call(this)) {
+        return;
+    }
+    var lonlat = asset.geometry.getBounds().getCenterLonLat();
+    var overlap_threshold = 1; // Features considered overlapping if within 1m of each other
+    var overlapping_features = this.getFeaturesWithinDistance(
+        new OpenLayers.Geometry.Point(lonlat.lon, lonlat.lat),
+        overlap_threshold
+    );
+
+    var parent_uprns = [];
+    $.each(overlapping_features, function(i, f) {
+        if (f.attributes.PARENTCHILD === 'Parent') {
+            parent_uprns.push("PARENTUPRN='" + f.attributes.UPRN + "'");
+        }
+    });
+    parent_uprns = parent_uprns.join(' OR ');
+
+    if (parent_uprns) {
+        var url = this.fixmystreet.http_options.url + OpenLayers.Util.getParameterString({
+            inSR: 4326,
+            f: 'geojson',
+            outFields: 'UPRN,Address',
+            where: parent_uprns
+        });
+        $.getJSON(url, function(data) {
+            var features = [];
+            $.each(data.features, function(i, f) {
+                features.push({ attributes: f.properties });
+            });
+            westminster_add_to_uprn_select($('#uprn'), features);
+        });
+    }
+    westminster_construct_uprn_select(overlapping_features, parent_uprns);
+};
+
+fixmystreet.assets.westminster.uprn_asset_not_found = function() {
+    $('.category_meta_message').html('You can pick a <b class="asset-spot">' + this.fixmystreet.asset_item + '</b> from the map &raquo;');
+    $("#uprn_select").addClass('js-reporting-page--skip');
+    fixmystreet.message_controller.asset_not_found.call(this);
+};
+
+fixmystreet.assets.westminster.asset_found = function(asset) {
+    // Remove any existing street entertainment messages using function below.
+    this.fixmystreet.actions.asset_not_found.call(this);
+
+    var attr = asset.attributes;
+    var site = attr.Site;
+    var category = attr.Category;
+    var terms = attr.Terms_Conditions;
+
+    var $msg = $('<div class="js-street-entertainment-message box-warning"></div>');
+    var $dl = $("<dl></dl>").appendTo($msg);
+
+    $dl.append("<dt>Site</dt>");
+    $dl.append($("<dd></dd>").text(site));
+
+    $dl.append("<dt>Category</dt>");
+    $dl.append($("<dd></dd>").text(category));
+
+    $dl.append("<dt>Terms & conditions</dt>");
+    $dl.append($("<dd></dd>").html(terms));
+
+    $msg.prependTo('#js-post-category-messages');
+};
+
+fixmystreet.assets.westminster.asset_not_found = function() {
+    $('.js-street-entertainment-message').remove();
+};
+
+if (fixmystreet.cobrand == 'westminster' || fixmystreet.cobrand == 'fixmystreet') {
+    $(function(){
+        $("#problem_form").on("change.category", "#form_type, #form_featuretypecode, #form_bin_type", function() {
+            $(fixmystreet).trigger('report_new:category_change');
+        });
+    });
+}
 
 })();

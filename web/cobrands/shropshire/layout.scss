@@ -25,8 +25,7 @@ body {
 
     a,
     span,
-    a.report-a-problem-btn,
-    span.report-a-problem-btn {
+    a.report-a-problem-btn {
         padding: 0.5em 0.4em;
         margin: 0 4px;
         border-radius: 4px;
@@ -53,8 +52,7 @@ body {
     }
 
     // darken background for selected nav item
-    span,
-    span.report-a-problem-btn {
+    span {
         &, &:hover {
             background-color: $nav_hover_background_colour;
         }
@@ -74,7 +72,7 @@ body {
     width: 240px;
     // height: 61px; // see below
     background-size: 240px 74px;
-    @include svg-background-image("/cobrands/shropshire/images/sc-logo-swoosh-v1_257x80");
+    background-image: url("/cobrands/shropshire/images/sc-logo-swoosh-v1_257x80.svg");
 
     // text-indent doesn’t play nicely with focus outline,
     // so use padding overflow trick instead
@@ -89,7 +87,7 @@ body {
         width:  $logo-width;
         // height: 61px; // see below
         background-size:  $logo-width  $logo-height;
-        @include svg-background-image("/cobrands/shropshire/images/sc-logo-v3");
+        background-image: url("/cobrands/shropshire/images/sc-logo-v3.svg");
     
         // text-indent doesn’t play nicely with focus outline,
         // so use padding overflow trick instead
@@ -101,30 +99,17 @@ body {
 }
 
 #front-main {
-    margin: 0 auto;
-    margin-top: 20px;
-    padding: 0 1em;
-    max-width: $container-max-width;
-    background: transparent;
+    margin-top: 4px;
 
     #front-main-container {
-        max-width: none;
-        background: #fff;
-        padding: 4%;
+        box-sizing: border-box;
+        padding: 2em;
         border-radius: 7px;
-    }
-
-    #postcodeForm {
-        overflow: visible;
-
-        div {
-            margin: 0;
-        }
     }
 }
 
-.content {
-    padding: 4%;
+.frontpage .content {
+    padding: 2em;
     border-radius: 7px;
 }
 
@@ -143,18 +128,6 @@ textarea.form-error {
 
 body.mappage #site-header {
     height: $mappage-header-height - 3px;
-}
-
-body.twothirdswidthpage .content .sticky-sidebar {
-    position: static;
-
-    aside {
-        position: static;
-        background: transparent;
-        padding: 0;
-        width: auto;
-        margin: 0 0 2em 0;
-    }
 }
 
 .shropshire-footer {

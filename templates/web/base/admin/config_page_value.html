@@ -36,6 +36,7 @@
     'internal_ips',
     'public_asset_ids',
     'roadworks_categories',
+    'categories_restriction_bodies',
     ] %]
     [% value.join(', ') %]
 
@@ -52,8 +53,31 @@
     Endpoint: [% value.endpoint %]
 [% CASE 'echo' %]
     Username: [% value.username %]
+[% CASE 'whitespace' %]
+    Username: [% value.username %]
+[% CASE 'dwf_evo_claim' %]
+    URL: [% value.base_url %]
 [% CASE 'govuk_notify' %]
     Template ID: [% value.template_id %]
+[% CASE 'nearby_distances' %]
+    Cobrand defaults:
+        <ul>
+            <li>
+                Inspectors: [% value.inspector %]m
+            </li>
+            <li>
+                Suggestions: [% IF value.suggestions.item('_fallback') %][% value.suggestions.item('_fallback') %][% ELSE  %][% value.suggestions %][% END %]m
+            </li>
+        </ul>
+    Custom per category:
+        <ul>
+            [% FOR k IN value.suggestions.keys.sort %]
+                [% NEXT IF k == '_fallback' %]
+                <li>
+                    [% k %]: [% value.suggestions.$k %]m
+                </li>
+            [% END %]
+        </ul>
 [% CASE 'oidc_login' %]
     Display name: [% value.display_name %]
 [% CASE 'throttle_username' %]
@@ -63,7 +87,7 @@
     <ul>
     [% FOR e IN value %]
         <li><i>[% e.key %]</i> <dl>
-            [% FOR ee IN e.value %] <dt>[% ee.areas.join(', ') %]</dt> <dd>[% ee.email %]</dd> [% END %]
+            [% FOR ee IN e.value %] <dt>[% ee.areas.join(', ') %]</dt> <dd>[% ee.email.replace('([;,])', '$1 ') %]</dd> [% END %]
             </dl> </li>
     [% END %]
     </ul>
@@ -80,7 +104,7 @@
     <dl>
       [% FOR ee IN value %]
         <dt>[% ee.key %]</dt>
-        <dd>[% ee.value %]</dd>
+        <dd>[% ee.value.join(', ') %]</dd>
       [% END %]
     </dl>
 [% CASE 'safety_critical_categories' %]

@@ -1,13 +1,15 @@
 [%
 
 USE pounds = format('%.2f');
-PROCESS '_bulky_data.html';
+PROCESS 'waste/_bulky_data.html';
 
 email_columns = 2;
 
 PROCESS '_email_settings.html';
 INCLUDE '_email_top.html';
 
+property_id_uri = report.waste_property_id | uri;
+cancel_url = cobrand.base_url _ '/waste/' _ property_id_uri _ '/' _ bulky_cancel_url _ '/' _ report.id;
 %]
 
 <th style="[% td_style %][% primary_column_style %]" id="primary_column">
@@ -27,15 +29,15 @@ INCLUDE '_email_top.html';
     [% END %]
   </p>
 
+  <p style="[% p_style %]">
+    Items to be collected:
+    [% INCLUDE 'waste/_bulky_list.html' %]
+  </p>
+
     [% INCLUDE '_council_reference.html' problem=report %]
 
   <p style="[% p_style %]">
     Collection date: [% collection_date %]
-  </p>
-
-  <p style="[% p_style %]">
-    Items to be collected:
-    [% FOR item IN item_list %]<br>[% item %][% END %]
   </p>
 
 [% IF payment %]
@@ -46,21 +48,21 @@ INCLUDE '_email_top.html';
 
 <p style="[% p_style %]">
   [%~ IF staff_cancellation %]
-    If you wish to cancel your booking, please call 01733 74 74 74.
-  [% ELSE %]
-    If you wish to cancel your booking, please visit <a href="[% cobrand.base_url %]/waste/[% report.get_extra_field_value('property_id') | uri %]/bulky_cancel">this link</a>.
+    [% IF cobrand.moniker == 'peterborough' %]
+      If you wish to cancel your booking, please call 01733 74 74 74.
+    [% END %]
+  [% ELSIF cobrand.moniker != 'peterborough' %]
+    If you wish to cancel your booking, please visit <a href="[% cancel_url %]">this link</a>.
 
     [% IF days == 1 %]
-      You can still cancel your booking, but a refund is no longer available.
-    [% ELSE %]
-      You can obtain a refund if you cancel more than one day before your booking.
+      You may still be able to cancel your booking.
     [% END %]
   [% END %]
 </p>
 
-  <p style="[% p_style %]">
-    <a href="https://www.peterborough.gov.uk/residents/rubbish-and-recycling/other-waste-collections">Terms and Conditions</a>
-  </p>
+[% IF cobrand.moniker == 'peterborough' %]
+   [% INCLUDE 'waste/_bulky_extra_text.html' %]
+[% END %]
 
   <p style="[% p_style %]">
     Kind regards,<br>Waste Services Team

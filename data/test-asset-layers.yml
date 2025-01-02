@@ -39,13 +39,93 @@ bathnes:
     stylemap: fixmystreet.assets.stylemap_invisible
     non_interactive: true
     always_visible: true
-    all_categories: true
     nearest_radius: 0.1
     road: true
     no_asset_msg_id: '#js-curo-group-restriction'
     actions:
       found: fixmystreet.assets.banes.curo_found
       not_found: fixmystreet.assets.banes.curo_not_found
+brent:
+  - http_wfs_url: "https://tilma.staging.mysociety.org/mapserver/brent"
+    max_resolution: 4.777314267158508
+    geometryName: 'msGeometry'
+    srsName: "EPSG:3857"
+    body: "Brent Council"
+  - wfs_feature: "Highways"
+    asset_type: 'area'
+    stylemap: 'fixmystreet.assets.stylemap_invisible'
+    nearest_radius: '0.1'
+    non_interactive: 1
+    asset_category: [ 'Fly-tipping', 'Pavement damage' ]
+    no_asset_message: 'The current category selected is only for reporting this type of problem on the public highway. If the problem is within a park or open space or a council estate please go back and choose ‘Council estate grounds maintenance’ or ‘Parks and open spaces’.'
+    road: 1
+    actions:
+      found: fixmystreet.assets.brent.road_found
+      not_found: fixmystreet.assets.brent.road_not_found
+  - wfs_feature: Housing
+    asset_item: estate
+    asset_type: area
+    asset_group: Council estates grounds maintenance
+    usrn:
+      attribute: site_name
+      field: location_name
+    no_asset_message: '<p><strong>Please select a housing estate from the map</strong></p><p>This type of issue can only be reported within housing estates that are maintained by Brent Council. These areas are marked in yellow on the map.</p>'
+    road: true
+    actions:
+      found: fixmystreet.assets.brent.found
+      not_found: fixmystreet.assets.brent.not_found
+    nearest_radius: 1
+    disable_pin_snapping: true
+  - wfs_feature: Parks_and_Open_Spaces
+    asset_item: park
+    asset_type: area
+    asset_group: Parks and open spaces
+    usrn:
+      attribute: site_name
+      field: location_name
+    no_asset_message: '<p><strong>Please select a park from the map</strong></p><p>This type of issue can only be reported within parks and green spaces that are maintained by Brent Council. These areas are marked in yellow on the map.</p>'
+    road: true
+    actions:
+      found: fixmystreet.assets.brent.found
+      not_found: fixmystreet.assets.brent.not_found
+    nearest_radius: 1
+    disable_pin_snapping: true
+  - wfs_feature: Allotments
+    asset_item: allotment
+    asset_type: area
+    asset_group: Allotments
+    usrn:
+      attribute: site_name
+      field: location_name
+    no_asset_message: '<p><strong>Please select an allotment from the map</strong></p><p>This type of issue can only be reported within allotments that are maintained by Brent Council. These areas are marked in yellow on the map.</p>'
+    road: true
+    actions:
+      found: fixmystreet.assets.brent.found
+      not_found: fixmystreet.assets.brent.not_found
+    nearest_radius: 1
+    disable_pin_snapping: true
+  - wfs_feature: Highway_Verges
+    asset_item: verge or flower bed
+    asset_type: area
+    asset_group: Roadside verges and flower beds
+    usrn:
+      attribute: site_name
+      field: location_name
+    no_asset_message: '<p><strong>Please select a verge or flower bed from the map</strong></p><p>This type of issue can only be reported within verges or flower beds that are maintained by Brent Council. These areas are marked in yellow on the map.</p>'
+    road: true
+    actions:
+      found: fixmystreet.assets.brent.found
+      not_found: fixmystreet.assets.brent.not_found
+    nearest_radius: 5
+    disable_pin_snapping: true
+  - wfs_feature: 'queens_park'
+    asset_type: 'area'
+    always_visible: true
+    road: true
+    non_interactive: true
+    stylemap: fixmystreet.assets.stylemap_invisible
+    no_asset_message: '<p>Queens Park is maintained by the City of London, not Brent Council.<p>'
+    actions: fixmystreet.assets.brent.cemetery_actions
 bromley:
   - http_wfs_url: "https://tilma.staging.mysociety.org/mapserver/bromley_wfs"
     asset_type: 'spot'
@@ -60,15 +140,61 @@ bromley:
       feature_id: 'FEATURE_ID'
     asset_category: ["Lamp Column Damaged", "Light Not Working", "Light On All Day", "Light blocked by vegetation"]
     asset_item: 'street light'
+    select_action: true
+    actions:
+      asset_found: fixmystreet.assets.bromley.set_asset_owner
+      asset_not_found: fixmystreet.assets.bromley.unset_asset_owner
   - wfs_feature: "PROW"
     stylemap: 'fixmystreet.assets.bromley.prow_stylemap'
     always_visible: true
     non_interactive: true
     road: true
-    all_categories: true
     usrn:
       attribute: 'PROW_REFER'
       field: 'prow_reference'
+  - wfs_feature: "Crystal_Palace_Park"
+    asset_type: 'area'
+    always_visible: true
+    road: true
+    non_interactive: true
+    stylemap: fixmystreet.assets.stylemap_invisible
+    all_categories: true
+    no_asset_message: "<p>The Management of Crystal Palace Park has transferred to the Crystal Palace Park Trust who are now responsible for the day-to-day management and maintenance of the park, as well as any community or commercial events and concession agreements within the park. Their website can be found at: <a href='https://www.crystalpalaceparktrust.org/'>https://www.crystalpalaceparktrust.org</a> where any issues or queries regarding the park can be submitted.</p>"
+    actions:
+      found: fixmystreet.assets.bromley.found
+      not_found: fixmystreet.assets.bromley.not_found
+  - wfs_feature: "National_Sports_Centre"
+    asset_type: 'area'
+    always_visible: true
+    road: true
+    non_interactive: true
+    stylemap: fixmystreet.assets.stylemap_invisible
+    all_categories: true
+    no_asset_message: "<p>This area is the responsibility of the National Sports Centre who oversee several of the access roads, the structure of the walkway and sports grounds as well as the associated lighting. They can be contacted directly via their website: <a href='https://www.better.org.uk/contactus'>https://www.better.org.uk/contactus</a></p>"
+    actions:
+      found: fixmystreet.assets.bromley.found
+      not_found: fixmystreet.assets.bromley.not_found
+  - wfs_feature: 'Parks_Open_Spaces'
+    stylemap: fixmystreet.assets.bromley.parks_stylemap
+    asset_type: 'area'
+    asset_item: 'park'
+    non_interactive: true
+    asset_group: ["Parks and Greenspace"]
+    road: true
+    actions:
+      found: fixmystreet.assets.bromley.remove_park_message
+      not_found: fixmystreet.assets.bromley.add_park_message
+    no_asset_message: "We’ve noticed that you’ve selected a Parks and Greenspace category but that your map pin isn’t located within a park, are the location and category correct? You can change category by going back or relocate your map pin by clicking and dragging."
+  - wfs_feature: 'Parks_Open_Spaces'
+    non_interactive: true
+    nearest_radius: 0
+    road: true
+    asset_group: [ 'Highway Enforcement', 'Highway Major Works', 'Road, Pavement and PROW Issues', 'Street Cleansing', 'Street Lighting and Road Signs' ]
+    stylemap: fixmystreet.assets.stylemap_invisible
+    actions:
+      found: fixmystreet.assets.bromley.add_park_message
+      not_found: fixmystreet.assets.bromley.remove_park_message
+    no_asset_message: "We’ve noticed that you’ve selected a Streets category but that your map pin is located within a park, are the location and category correct? You can change category by going back or relocate your map pin by clicking and dragging."
 buckinghamshire:
   - - name: 'default'
       http_wfs_url: "https://tilma.staging.mysociety.org/mapserver/bucks"
@@ -115,7 +241,7 @@ buckinghamshire:
       found: fixmystreet.assets.buckinghamshire.speed_found
       not_found: fixmystreet.assets.buckinghamshire.speed_not_found
     no_asset_msg_id: '#js-not-a-road'
-    asset_category: ["Grass cutting", "Hedge problem", "Dirty signs"]
+    asset_category: ["Grass cutting", "Hedge problem", "Dirty signs", "Unauthorised signs"]
     non_interactive: true
     road: true
     asset_item: 'road'
@@ -141,7 +267,6 @@ northamptonshire:
     body: "Northamptonshire Highways"
     attributes:
       asset_resource_id: "asset_id"
-    select_action: true
     actions:
       asset_found: fixmystreet.assets.northamptonshire.asset_found
       asset_not_found: fixmystreet.assets.northamptonshire.asset_not_found
@@ -160,7 +285,6 @@ oxfordshire:
         unit_number: "title"
         unit_type: "unit_type"
         asset_resource_id: "itemId"
-      select_action: true
       feature_code: 'title'
       asset_id_field: 'itemId'
       construct_selected_asset_message: fixmystreet.assets.oxfordshire.light_construct_selected_asset_message
@@ -200,7 +324,6 @@ peterborough:
     - name: 'trees'
       template: 'tilma'
       class: OpenLayers.Layer.VectorAssetMove
-      select_action: true
       actions:
         asset_found: fixmystreet.message_controller.asset_found
         asset_not_found: fixmystreet.message_controller.asset_not_found
@@ -225,7 +348,22 @@ peterborough:
           outFields: ''
       nearest_radius: 0.01
       stylemap: fixmystreet.assets.stylemap_invisible
-      asset_category: ['General fly tipping', 'Hazardous fly tipping', 'Offensive graffiti', 'Non offensive graffiti', 'Offensive graffiti - STAFF ONLY' ]
+      asset_category: ['General fly tipping', 'Hazardous fly tipping']
+      non_interactive: true
+      road: true
+      asset_item: 'road'
+      asset_type: 'road'
+    - name: 'graffiti'
+      template: 'arcgis'
+      http_options:
+        params:
+          inSR: '3857'
+          outSR: '3857'
+          f: 'geojson'
+          outFields: ''
+      nearest_radius: 0.01
+      stylemap: fixmystreet.assets.stylemap_invisible
+      asset_category: ['Offensive graffiti', 'Non offensive graffiti', 'Offensive graffiti - STAFF ONLY']
       non_interactive: true
       road: true
       asset_item: 'road'
@@ -243,7 +381,6 @@ peterborough:
     asset_group: 'Street lighting'
     asset_category: 'Lighting enquiry'
     relevant: fixmystreet.assets.peterborough.lighting_relevant
-    select_action: true
     actions:
       asset_found: fixmystreet.assets.peterborough.lighting_asset_found
       asset_not_found: fixmystreet.assets.peterborough.lighting_asset_not_found
@@ -254,12 +391,23 @@ peterborough:
     actions:
       found: fixmystreet.assets.peterborough.flytipping_pcc_found
       not_found: fixmystreet.assets.peterborough.flytipping_pcc_not_found
+  - template: 'graffiti'
+    http_options:
+      url: 'https://tilma.staging.mysociety.org/resource-proxy/proxy.php?https://peterborough.assets/4/query?'
+    actions:
+      found: fixmystreet.assets.peterborough.graffiti_pcc_found
+      not_found: fixmystreet.assets.peterborough.graffiti_pcc_not_found
   # PCC Property Leased Out NOT Responsible
   - template: 'flytipping'
     http_options:
       url: 'https://tilma.staging.mysociety.org/resource-proxy/proxy.php?https://peterborough.assets/3/query?'
     actions:
       found: fixmystreet.assets.peterborough.flytipping_leased_found
+  - template: 'graffiti'
+    http_options:
+      url: 'https://tilma.staging.mysociety.org/resource-proxy/proxy.php?https://peterborough.assets/3/query?'
+    actions:
+      found: fixmystreet.assets.peterborough.graffiti_leased_found
 shropshire:
   - http_wfs_url: "https://tilma.mysociety.org/mapserver/shropshire"
     asset_type: 'spot'
@@ -281,7 +429,206 @@ shropshire:
     no_asset_msgs_class: '.js-roads-shropshire'
     always_visible: true
     non_interactive: true
-    all_categories: true
     actions:
       found: 'fixmystreet.assets.shropshire.street_found'
       not_found: 'fixmystreet.assets.shropshire.street_not_found'
+surrey:
+  - asset_type: 'spot'
+    max_resolution: 4.777314267158508
+    asset_id_field: 'assetNo'
+    srsName: "EPSG:4326"
+    body: "Surrey County Council"
+    format_class: OpenLayers.Format.GeoJSON
+    format_options: {ignoreExtraDims: true}
+    protocol_class: OpenLayers.Protocol.ArcgisHTTP
+    class: OpenLayers.Layer.VectorAssetMove
+    http_options:
+      params:
+        inSR: '4326'
+        f: 'geojson'
+  - always_visible: true
+    asset_type: road
+    road: true
+    actions:
+      found: fixmystreet.message_controller.road_found
+      not_found: fixmystreet.assets.surrey.road_not_found
+    permissive_categories: ['Flooding inside a building', 'Flooding not on the highway but in a park or private land']
+    no_asset_msg_id: '#js-not-a-road'
+    http_options:
+      params:
+        outFields: USRN
+        where: MAINTAINED_BY='Surrey CC'
+      url: https://tilma.mysociety.org/resource-proxy/proxy.php?https://surrey.assets/2/query?
+    non_interactive: true
+    class: OpenLayers.Layer.VectorNearest
+    stylemap: fixmystreet.assets.stylemap_invisible
+    usrn:
+      attribute: USRN
+      field: site_code
+tfl:
+  - - http_wfs_url: "https://tilma.staging.mysociety.org/mapserver/tfl"
+      name: 'road'
+      asset_type: 'spot'
+      max_resolution: 2.388657133579254
+      geometryName: 'msGeometry'
+      srsName: "EPSG:3857"
+    - name: 'assets'
+      template: 'road'
+      class: OpenLayers.Layer.VectorAssetMove
+      body: 'TfL'
+      actions:
+        asset_found: fixmystreet.assets.tfl.asset_found
+        asset_not_found: fixmystreet.assets.tfl.asset_not_found
+  - template: 'assets'
+    wfs_feature: "trafficsignals"
+    asset_id_field: 'Site'
+    attributes:
+        site: 'Site'
+    asset_group: "Traffic Lights"
+    asset_item: 'traffic signal'
+  - template: 'assets'
+    wfs_feature: "busstops"
+    asset_id_field: 'STOP_CODE'
+    attributes:
+        stop_code: 'STOP_CODE'
+        shelter_id: 'SHELTER_ID'
+    asset_group: "Bus Stops and Shelters"
+    asset_item: 'bus stop'
+  - template: 'assets'
+    wfs_feature: "busstations"
+    asset_id_field: 'Name'
+    feature_code: 'Name'
+    attributes:
+      station_name: 'Name'
+    asset_group: "Bus Stations"
+    asset_item: 'bus station'
+  - template: 'assets'
+    http_wfs_url: ''
+    http_options:
+      url: "https://tilma.staging.mysociety.org/streetmanager.php"
+      params:
+        points: 1
+        end_today: 1
+    srsName: "EPSG:27700"
+    format_class: OpenLayers.Format.GeoJSON
+    name: "Roadworks"
+    asset_category: "Roadworks"
+    stylemap: fixmystreet.assets.tfl.roadworks_stylemap
+    asset_id_field: 'work_ref'
+    asset_item: 'roadworks'
+    attributes:
+      promoter_works_ref: 'work_ref'
+      start: fixmystreet.assets.tfl.roadworks_attribute_start
+      end: fixmystreet.assets.tfl.roadworks_attribute_end
+      promoter: 'promoter'
+      works_desc: 'description'
+      works_state: 'status'
+      tooltip: 'summary'
+    filter_key: true
+    filter_value: fixmystreet.assets.tfl.roadworks_filter_value
+    actions:
+      asset_found: fixmystreet.assets.tfl.roadworks_asset_found
+      asset_not_found: fixmystreet.assets.tfl.roadworks_asset_not_found
+  - template: 'road'
+    wfs_feature: "RedRoutes"
+    name: "Red Routes"
+    max_resolution: 9.554628534317017
+    road: true
+    non_interactive: true
+    always_visible: true
+    nearest_radius: 0.1
+    stylemap: fixmystreet.assets.tfl.tlrn_stylemap
+    no_asset_msg_id: '#js-not-tfl-road'
+    actions:
+      found: fixmystreet.message_controller.road_found
+      not_found: fixmystreet.assets.tfl.red_routes_not_found
+  - template: 'road'
+    wfs_feature: "A13TLRN_DBFO"
+    max_resolution: 9.554628534317017
+    road: true
+    non_interactive: true
+    always_visible: true
+    nearest_radius: 0.1
+    stylemap: fixmystreet.assets.tfl.tlrn_stylemap
+    no_asset_msg_id: '#js-tlrn-dbfo-road'
+    actions:
+      found: fixmystreet.assets.tfl.a13_found
+      not_found: fixmystreet.message_controller.road_found
+westminster:
+  - - asset_type: 'spot'
+      max_resolution: 4.777314267158508
+      asset_id_field: 'central_asset_id'
+      srsName: "EPSG:4326"
+      body: "Westminster City Council"
+      format_class: OpenLayers.Format.GeoJSON
+      format_options: {ignoreExtraDims: true}
+      protocol_class: OpenLayers.Protocol.ArcgisHTTP
+      http_options:
+        params:
+          inSR: '4326'
+          f: 'geojson'
+    - name: 'uprn'
+      template: 'default'
+      class: OpenLayers.Layer.VectorAssetMove
+      asset_item: 'property'
+      http_options:
+        url: "https://tilma.mysociety.org/resource-proxy/proxy.php?https://westminster.staging/25/query?"
+        params:
+          inSR: '4326'
+          f: 'geojson'
+          where: "PARENTUPRN='XXXX' AND PROPERTYTYPE NOT IN ('Pay Phone','Street Record')"
+          outFields: 'UPRN,Address,ParentChild'
+      max_resolution: 0.5971642833948135
+      attributes:
+        UPRN: 'UPRN'
+      actions:
+        asset_found: fixmystreet.assets.westminster.uprn_asset_found
+        asset_not_found: fixmystreet.assets.westminster.uprn_asset_not_found
+    - name: 'point'
+      template: 'default'
+      http_options:
+        params:
+          inSR: '4326'
+          f: 'geojson'
+          outFields: 'central_asset_id'
+      attributes:
+        central_asset_id: 'central_asset_id'
+    - name: 'subcat'
+      template: 'point'
+      class: OpenLayers.Layer.VectorAssetWestminsterSubcat
+  - http_options:
+      url: "https://tilma.mysociety.org/resource-proxy/proxy.php?https://westminster.staging/40/query?"
+      params:
+        outFields: 'USRN'
+    always_visible: true
+    non_interactive: true
+    stylemap: fixmystreet.assets.stylemap_invisible
+    nearest_radius: 100
+    usrn:
+      attribute: 'USRN'
+      field: 'USRN'
+  - template: 'uprn'
+    asset_category: [ 'Damaged, dirty, or missing bin' ]
+    class: OpenLayers.Layer.VectorAssetWestminsterSubcatUPRN
+    subcategories: [ '1', '4' ]
+    subcategory_id: '#form_bin_type'
+  - template: 'point'
+    asset_category: 'Busking and Street performance'
+    asset_item: 'street entertainment pitch'
+    http_options:
+      url: https://tilma.mysociety.org/resource-proxy/proxy.php?https://westminster.staging/66/query?
+      params:
+        outFields: 'Site,Category,Terms_Conditions,UPRN'
+    attributes:
+      UPRN: 'UPRN'
+    actions:
+      asset_found: fixmystreet.assets.westminster.asset_found
+      asset_not_found: fixmystreet.assets.westminster.asset_not_found
+  - template: 'subcat'
+    asset_category: 'Signs and bollards'
+    subcategories: [ '2' ]
+    subcategory_id: '#form_featuretypecode'
+    asset_item: 'street nameplate'
+    http_options:
+      url: https://tilma.mysociety.org/resource-proxy/proxy.php?https://westminster.staging/46/query?
+

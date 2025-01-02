@@ -85,8 +85,7 @@ sub send {
     }
 
     my ($verbose, $nomail) = CronFns::options();
-    my $cobrand = $row->get_cobrand_logged;
-    $cobrand = $cobrand->call_hook(get_body_handler_for_problem => $row) || $cobrand;
+    my $cobrand = $row->body_handler || $row->get_cobrand_logged;
 
     my $params = {
         To => $self->to,
@@ -122,7 +121,7 @@ sub send {
         $params, $sender, $nomail, $cobrand, $row->lang);
 
     unless ($result) {
-        $row->set_extra_metadata('sent_to' => email_list($params->{To}));
+        $row->update_extra_metadata(sent_to => email_list($params->{To}));
         $self->success(1);
     } else {
         $self->error( 'Failed to send email' );

@@ -5,7 +5,7 @@
 
 .header-search .site-search .form-control {
     // overrides from default .form-control
-    @include border-radius(0);
+    border-radius: 0;
     box-shadow: none;
     border: solid 1px #bfc1c3;
     display: inline-block;
@@ -53,19 +53,11 @@
         font-weight: normal;
         font-size: 1.5em;
     }
-    #postcodeForm {
-        margin-top: 0;
-        padding-top: 0;
-        div {
-            margin-left: 0;
-        }
-    }
 
     a {
         color: $primary_b;
 
         &:hover {
-            color: $primary_b;
             text-decoration: none;
         }
     }
@@ -89,6 +81,10 @@
     }
 }
 
+.postcode-form-box {
+    padding-top: 0; // The UL above has a large margin bottom
+}
+
 // Map page
 
 .big-green-banner {
@@ -103,12 +99,6 @@ body.mappage {
     .global-footer {
         display: none;
     }
-}
-
-// Help
-
-body.twothirdswidthpage .content .sticky-sidebar aside {
-    top: 12em;
 }
 
 // Stats homepage

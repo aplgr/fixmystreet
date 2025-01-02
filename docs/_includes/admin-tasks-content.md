@@ -546,7 +546,7 @@ You can also always edit any user from the table at the top of the Users page by
 Select the roles or permissions you wish that user to have, and click ‘submit changes’.
 
 
-#### Setting categories or areas
+#### Setting categories to users and roles
 
 <span class="admin-task__permissions">Permissions required: User must be marked as staff; ‘Assign users to areas’ must be ticked (for areas).</span>
 
@@ -559,7 +559,12 @@ staff user only deals with reports of a specific type.
 
 Roles can also have categories associated with them. This works in the same way as assigning categories
 to a user. You can assign categories to a role by editing the role and checking the relevant category
-boxes. Users will then only be able to see categories relevant to their role.
+boxes. By default, users will then be shown a filtered list of categories relevant to their role. 
+
+**Please note:** there is no restriction functionality to prevent users from seeing other categories by removing the default filter. However, this can be done if required by:
+
+1. Ticking "Frontend staff access only to users assigned to this category" on a particular category page - this restricts the category, so that only staff assigned to that category will see staff-related features.
+2. Ticking "Assigned categories only" on a user's page - this restricts that user to only see front end staff features in their assigned categories.
 
 #### Removing staff status from accounts
 
@@ -645,6 +650,10 @@ Categories can be made ‘staff only’, where they are only available to logged
 members of staff, not members of the public. This could be used for e.g.
 contact centre staff to leave reports in categories that you still want to be
 phoned in.
+
+Categories can be marked as a litter category for when the council is responsible
+for litter on parts of a Highways England road. This will mean the category
+will be included in the Highways England categories for any relevant stretch of road.
 
 You can set up as many or as few categories as you like, and each category can have its own email
 address attached to it, so for example, reports about potholes may go to one council email
@@ -878,7 +887,8 @@ you give e.g. estimated timescales or other useful information up front.
 
 If you enter text in the ‘Text for email alert field’, the template text will update
 the report on the website and the email text will be sent to the user if they have
-opted into alerts.
+opted into alerts. Otherwise the email text will be the same as the template text
+that has updated the report.
 
 
 
@@ -969,13 +979,13 @@ particular date range:
 </div>
 
 
-<div class="admin-task" markdown="1" id="emergency-message">
+<div class="admin-task" markdown="1" id="site-message">
 
-### Displaying an emergency message
+### Displaying a site message
 
-<span class="admin-task__permissions">Permissions required: User must be marked as staff and ‘Add/edit emergency message’ must be ticked.</span>
+<span class="admin-task__permissions">Permissions required: User must be marked as staff and ‘Add/edit site message’ must be ticked.</span>
 
-This feature allows you to set emergency messages which will be displayed on
+This feature allows you to set site messages which will be displayed on
 the homepage or reporting pages; you can have different messages for in/out of hours.
 
 Certain HTML tags can be used for formatting purposes. These are limited to the same set as described
@@ -986,16 +996,16 @@ you want multiple paragraphs they should be separated with blank lines as in the
 To clear the message simply delete any contents in the box.
 
 <img alt="The HTML text entered in to the box will be rendered on the homepage."
-    src="/assets/img/pro-user-guide/emergency-message-editing.png" class="admin-screenshot" />
+    src="/assets/img/pro-user-guide/site-message-editing.png" class="admin-screenshot" />
 
-<img alt="An emergency message can be shown to users on the FixMyStreet homepage."
-    src="/assets/img/pro-user-guide/emergency-message-example.png" class="admin-screenshot" />
+<img alt="A site message can be shown to users on the FixMyStreet homepage."
+    src="/assets/img/pro-user-guide/site-message-example.png" class="admin-screenshot" />
 
 You can set the time periods that will count as out of hours on the same page. For example,
 if your out of hours were 6pm to 8am Monday to Friday, all day weekends and Bank Holidays,
 plus Christmas Eve, you would set it up as the following screenshot:
 
 <img alt="Saturday, Sunday, Bank Holidays, and a special Christmas Eve, 00:00-24:00; Monday to Friday 00:00-08:00 and 18:00-24:00."
-    src="/assets/img/pro-user-guide/emergency-message-time-periods.png" class="admin-screenshot">
+    src="/assets/img/pro-user-guide/site-message-time-periods.png" class="admin-screenshot">
 
 </div>

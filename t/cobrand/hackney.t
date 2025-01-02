@@ -1,7 +1,7 @@
-use utf8;
 use CGI::Simple;
 use DateTime;
 use DateTime::Format::W3CDTF;
+use File::Temp 'tempdir';
 use JSON::MaybeXS;
 use Test::MockModule;
 use Test::MockTime qw(:all);
@@ -11,6 +11,7 @@ use Open311::GetServiceRequests;
 use Open311::GetServiceRequestUpdates;
 use Open311::PostServiceRequestUpdates;
 use FixMyStreet::Script::Alerts;
+use FixMyStreet::Script::CSVExport;
 use FixMyStreet::Script::Reports;
 
 # disable info logs for this test run
@@ -26,9 +27,10 @@ my $params = {
     endpoint => 'endpoint',
     jurisdiction => 'home',
     can_be_devolved => 1,
+    cobrand => 'hackney',
 };
 
-my $hackney = $mech->create_body_ok(2508, 'Hackney Council', $params, { cobrand => 'hackney' });
+my $hackney = $mech->create_body_ok(2508, 'Hackney Council', $params);
 my $contact = $mech->create_contact_ok(
     body_id => $hackney->id,
     category => 'Potholes & stuff',
@@ -313,7 +315,7 @@ FixMyStreet::override_config {
 }, sub {
     subtest "special send handling" => sub {
         my $cbr = Test::MockModule->new('FixMyStreet::Cobrand::Hackney');
-        my $p = FixMyStreet::DB->resultset("Problem")->search(undef, { order_by => { -desc => 'id' } })->first;
+        my $p = FixMyStreet::DB->resultset("Problem")->order_by('-id')->first;
         $contact2->update({ email => 'park:parks@example;estate:estates@example;other:OTHER', send_method => '' });
 
         subtest 'in a park' => sub {
@@ -332,7 +334,8 @@ FixMyStreet::override_config {
             is $email->header('To'), '"Hackney Council" <parks@example>';
             $mech->clear_emails_ok;
             $p->discard_changes;
-            $p->update({ whensent => undef });
+            $p->resend;
+            $p->update;
         };
 
         subtest 'in an estate' => sub {
@@ -351,7 +354,8 @@ FixMyStreet::override_config {
             is $email->header('To'), '"Hackney Council" <estates@example>';
             $mech->clear_emails_ok;
             $p->discard_changes;
-            $p->update({ whensent => undef });
+            $p->resend;
+            $p->update;
         };
 
         subtest 'elsewhere' => sub {
@@ -375,6 +379,7 @@ FixMyStreet::override_config {
             cobrand => 'hackney',
             category => 'Roads',
             whensent => \'current_timestamp',
+            send_state => 'sent',
         });
         my $whensent = $problem->whensent;
         $mech->log_in_ok( $hackney_user->email );
@@ -388,10 +393,10 @@ FixMyStreet::override_config {
             $mech->submit_form_ok({ with_fields => { category => $_->{category} } }, "Switch to $_->{category}");
             $problem->discard_changes;
             if ($_->{resent}) {
-                is $problem->whensent, undef, "Marked for resending";
-                $problem->update({ whensent => $whensent, send_method_used => 'Open311' }); # reset as sent
+                is $problem->send_state, 'unprocessed', "Marked for resending";
+                $problem->update({ whensent => $whensent, send_method_used => 'Open311', send_state => 'sent' }); # reset as sent
             } else {
-                isnt $problem->whensent, undef, "Not marked for resending";
+                is $problem->send_state, 'sent', "Not marked for resending";
             }
         }
     };
@@ -443,7 +448,7 @@ Rubble";
         (my $c_title = $c->param('attribute[title]')) =~ s/\r\n/\n/g;
         is $c_title, $expected_title;
 
-        my $p = FixMyStreet::DB->resultset("Problem")->search(undef, { order_by => { -desc => 'id' } })->first;
+        my $p = FixMyStreet::DB->resultset("Problem")->order_by('-id')->first;
         is $c->param('attribute[requested_datetime]'), DateTime::Format::W3CDTF->format_datetime($p->confirmed->set_nanosecond(0));
     };
 };
@@ -515,11 +520,12 @@ subtest 'Dashboard CSV extra columns' => sub {
         latitude => 51.552267,
         longitude => -0.063316,
         cobrand => 'hackney',
+        areas => ',2508,144390,',
         geocode => {
             resourceSets => [ {
                 resources => [ {
-                    name => '12 A Street, XX1 1SZ',
                     address => {
+                        formattedAddress => '12 A Street, XX1 1SZ',
                         addressLine => '12 A Street',
                         postalCode => 'XX1 1SZ'
                     }
@@ -532,14 +538,22 @@ subtest 'Dashboard CSV extra columns' => sub {
     });
 
     $mech->log_in_ok( $hackney_user->email );
+    my $UPLOAD_DIR = tempdir( CLEANUP => 1 );
     FixMyStreet::override_config {
         MAPIT_URL => 'http://mapit.uk/',
         ALLOWED_COBRANDS => 'hackney',
+        PHOTO_STORAGE_OPTIONS => { UPLOAD_DIR => $UPLOAD_DIR },
     }, sub {
         $mech->get_ok('/dashboard?export=1');
+        $mech->content_contains('"Reported As","Nearest address","Nearest postcode","Extra details"');
+        $mech->content_contains('hackney,,"12 A Street, XX1 1SZ","XX1 1SZ","Some detailed information"');
+
+        FixMyStreet::Script::CSVExport::process(dbh => FixMyStreet::DB->schema->storage->dbh);
+        $mech->get_ok('/dashboard?export=1&ward=144390');
+        $mech->content_contains('Brownswood');
+        $mech->get_ok('/dashboard?export=1&ward=144387');
+        $mech->content_lacks('Brownswood');
     };
-    $mech->content_contains('"Reported As","Nearest address","Nearest postcode","Extra details"');
-    $mech->content_contains('hackney,,"12 A Street, XX1 1SZ","XX1 1SZ","Some detailed information"');
 };
 
 done_testing();

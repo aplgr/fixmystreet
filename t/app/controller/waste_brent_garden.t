@@ -1,8 +1,8 @@
-use utf8;
 use Test::MockModule;
 use Test::MockTime qw(:all);
 use FixMyStreet::TestMech;
 use FixMyStreet::Script::Reports;
+use List::MoreUtils qw(firstidx);
 
 FixMyStreet::App->log->disable('info');
 END { FixMyStreet::App->log->enable('info'); }
@@ -14,7 +14,7 @@ set_fixed_time('2023-01-09T17:00:00Z'); # Set a date when garden service full pr
 
 my $mech = FixMyStreet::TestMech->new;
 
-my $body = $mech->create_body_ok(2488, 'Brent', {}, { cobrand => 'brent' });
+my $body = $mech->create_body_ok(2488, 'Brent', { cobrand => 'brent' });
 my $user = $mech->create_user_ok('test@example.net', name => 'Normal User');
 my $staff_user = $mech->create_user_ok('staff@example.org', from_body => $body, name => 'Staff User');
 $staff_user->user_body_permissions->create({ body => $body, permission_type => 'contribute_as_anonymous_user' });
@@ -44,6 +44,26 @@ create_contact({ category => 'Garden Subscription', email => 'garden@example.com
     { code => 'new_containers', required => 1, automated => 'hidden_field' },
     { code => 'payment', required => 1, automated => 'hidden_field' },
     { code => 'payment_method', required => 1, automated => 'hidden_field' },
+    { code => 'email_renewal_reminders_opt_in', required => 0, automated => 'hidden_field' },
+);
+
+create_contact({ category => 'Amend Garden Subscription', email => 'garden@example.com'},
+    { code => 'Additional_Collection_Container_Type', required => 1, automated => 'hidden_field' },
+    { code => 'Additional_Collection_Container_Quantity', required => 1, automated => 'hidden_field' },
+    { code => 'Container_Type', required => 0, automated => 'hidden_field' },
+    { code => 'Container_Quantity', required => 0, automated => 'hidden_field' },
+    { code => 'System Notes', required => 0, automated => 'hidden_field' },
+    { code => 'Paid_Collection_Container_Quantity', required => 1, automated => 'hidden_field' },
+    { code => 'Payment_Value', required => 1, automated => 'hidden_field' },
+    { code => 'pro_rata', required => 0, automated => 'hidden_field' },
+    { code => 'payment', required => 1, automated => 'hidden_field' },
+    { code => 'payment_method', required => 1, automated => 'hidden_field' },
+    { code => 'email_renewal_reminders_opt_in', required => 0, automated => 'hidden_field' },
+);
+
+create_contact({ category => 'Cancel Garden Subscription', email => 'garden@example.com'},
+    { code => 'End_Date', required => 1, automated => 'hidden_field' },
+    { code => 'payment_method', required => 1, automated => 'hidden_field' },
 );
 
 package SOAP::Result;
@@ -52,8 +72,8 @@ sub new { my $c = shift; bless { @_ }, $c; }
 
 package main;
 
-sub garden_waste_no_bins {
-    return [ {
+sub food_waste_collection {
+    return {
         Id => 1001,
         ServiceId => 316,
         ServiceName => 'Food waste collection',
@@ -62,6 +82,10 @@ sub garden_waste_no_bins {
             TaskTypeId => 1688,
             ServiceTaskSchedules => { ServiceTaskSchedule => [ {
                 ScheduleDescription => 'every other Monday',
+                Allocation => {
+                    RoundName => 'Monday ',
+                    RoundGroupName => 'Delta 04 Week 2',
+                },
                 StartDate => { DateTime => '2020-01-01T00:00:00Z' },
                 EndDate => { DateTime => '2050-01-01T00:00:00Z' },
                 NextInstance => {
@@ -75,7 +99,13 @@ sub garden_waste_no_bins {
                 },
             } ] },
         } },
-    }, {
+    };
+}
+
+sub garden_waste_no_bins {
+    return [
+        food_waste_collection(),
+    {
         # Eligibility for garden waste, but no task
         Id => 1002,
         ServiceId => 317,
@@ -84,18 +114,34 @@ sub garden_waste_no_bins {
     } ];
 }
 
+sub garden_waste_one_sack {
+    my $refuse_bin = food_waste_collection();
+    my $garden_bin = _garden_waste_service_units(1, 'sack');
+    return [ $refuse_bin, $garden_bin ];
+}
+
 sub garden_waste_one_bin {
-    my $refuse_bin = garden_waste_no_bins();
+    my $refuse_bin = food_waste_collection();
     my $garden_bin = _garden_waste_service_units(1, 'bin');
-    return [ $refuse_bin->[0], $garden_bin->[0] ];
+    return [ $refuse_bin, $garden_bin ];
+}
+
+sub garden_waste_two_bins {
+    my $refuse_bin = food_waste_collection();
+    my $garden_bin = _garden_waste_service_units(2, 'bin');
+    return [ $refuse_bin, $garden_bin ];
 }
 
 sub _garden_waste_service_units {
     my ($bin_count, $type) = @_;
 
+    if ($type eq 'sack') {
+        $bin_count = 9;
+    }
+
     my $bin_type_id = 1;
 
-    return [ {
+    return {
         Id => 1002,
         ServiceId => 317,
         ServiceName => 'Garden waste collection',
@@ -111,6 +157,10 @@ sub _garden_waste_service_units {
             } ] },
             ServiceTaskSchedules => { ServiceTaskSchedule => [ {
                 ScheduleDescription => 'every other Monday',
+                Allocation => {
+                    RoundName => 'Monday ',
+                    RoundGroupName => 'Delta 04 Week 2',
+                },
                 StartDate => { DateTime => '2020-03-30T00:00:00Z' },
                 EndDate => { DateTime => '2021-03-30T00:00:00Z' },
                 NextInstance => {
@@ -123,7 +173,7 @@ sub _garden_waste_service_units {
                     Ref => { Value => { anyType => [ 567, 890 ] } },
                 },
             } ] },
-        } } } ];
+        } } };
 }
 
 FixMyStreet::override_config {
@@ -138,6 +188,9 @@ FixMyStreet::override_config {
             hmac => '1234',
             hmac_id => '1234',
             scpID => '1234',
+            paye_hmac => '1234',
+            paye_hmac_id => '1234',
+            paye_siteID => '1234',
         } },
         waste_features => { brent => {text_for_waste_payment => 'Payment processed'} },
         anonymous_account => { brent => 'anonymous.customer' },
@@ -147,6 +200,7 @@ FixMyStreet::override_config {
         user_id => $user->id,
         category => 'Garden Subscription',
         whensent => \'current_timestamp',
+        send_state => 'sent',
     });
     $p->title('Garden Subscription - New');
     $p->update_extra_field({ name => 'property_id', value => 12345});
@@ -190,6 +244,48 @@ FixMyStreet::override_config {
         };
     });
 
+    my $paye = Test::MockModule->new('Integrations::Paye');
+    $paye->mock(call => sub {
+        my $self = shift;
+        my $method = shift;
+        $call_params = { @_ };
+    });
+    $paye->mock(pay => sub {
+        my $self = shift;
+        $sent_params = shift;
+        $paye->original('pay')->($self, $sent_params);
+        return {
+            transactionState => 'InProgress',
+            apnReference => '4ab5f886-de7d-4f5b-bbd8-42151a5deb82',
+            requestId => '21355',
+            invokeResult => {
+                status => 'Success',
+                redirectUrl => 'http://paye.example.org/faq',
+            }
+        }
+    });
+    $paye->mock(query => sub {
+        my $self = shift;
+        $sent_params = shift;
+        return {
+            transactionState => 'Complete',
+            paymentResult => {
+                status => 'Success',
+                paymentDetails => {
+                    authDetails => {
+                        authCode => 'authCode',
+                        uniqueAuthId => 54321,
+                    },
+                    payments => {
+                        paymentSummary => {
+                            continuousAuditNumber => 'CAN',
+                        }
+                    }
+                }
+            }
+        };
+    });
+
     my $echo = Test::MockModule->new('Integrations::Echo');
     $echo->mock('GetEventsForObject', sub { [] });
     $echo->mock('GetTasks', sub { [] });
@@ -208,7 +304,21 @@ FixMyStreet::override_config {
             Description => '2 Example Street, Brent, ',
         };
     });
+
+    $echo->mock('GetServiceUnitsForObject', \&garden_waste_one_sack);
+    subtest 'check sack subscription template change for sacks' => sub {
+        set_fixed_time('2020-05-09T17:00:00Z');
+        $mech->get_ok('/waste/12345');
+        $mech->content_contains('<dd class="govuk-summary-list__value">Sacks</dd>');
+    };
+
     $echo->mock('GetServiceUnitsForObject', \&garden_waste_one_bin);
+
+    subtest 'check sack subscription template does not affect normal bin count' => sub {
+        set_fixed_time('2020-05-09T17:00:00Z');
+        $mech->get_ok('/waste/12345');
+        $mech->content_contains('<dd class="govuk-summary-list__value">1 bin</dd>');
+    };
 
     subtest 'check subscription link present' => sub {
         set_fixed_time('2021-03-09T17:00:00Z');
@@ -218,6 +328,13 @@ FixMyStreet::override_config {
         set_fixed_time('2021-05-05T17:00:00Z');
         $mech->get_ok('/waste/12345');
         $mech->content_contains('Subscribe to Garden waste collection service', 'Subscribe link present if expired');
+    };
+
+    $echo->mock('GetServiceUnitsForObject', [ food_waste_collection() ]);
+    subtest 'check new sub bin limits' => sub {
+        $mech->get_ok('/waste/12345/garden');
+        is $mech->uri->path, '/waste/12345';
+        $mech->content_lacks('Subscribe to Garden waste collection service');
     };
 
     $echo->mock('GetServiceUnitsForObject', \&garden_waste_no_bins);
@@ -240,80 +357,66 @@ FixMyStreet::override_config {
         is $mech->value('current_bins'), 1, "current bins is set to 1";
     };
 
-    for my $test (
-        {
+    subtest 'check new sub credit card payment' => sub {
+        my $test = {
             month => '01',
             pounds_cost => '50.00',
             pence_cost => '5000'
-        },
-        {
-            month => '10',
-            pounds_cost => '25.00',
-            pence_cost => '2500'
-        }
-    ) {
-
-        subtest 'check new sub credit card payment' => sub {
-            set_fixed_time("2021-$test->{month}-09T17:00:00Z");
-            $mech->get_ok('/waste/12345/garden');
-            $mech->submit_form_ok({ form_number => 1 });
-            $mech->submit_form_ok({ with_fields => { existing => 'no' } });
-            $mech->content_like(qr#Total to pay now: £<span[^>]*>0.00#, "initial cost set to zero");
-            $mech->submit_form_ok({ with_fields => {
-                current_bins => 0,
-                bins_wanted => 1,
-                payment_method => 'credit_card',
-                name => 'Test McTest',
-                email => 'test@example.net'
-            } });
-            $mech->content_contains('Test McTest');
-            $mech->content_contains('£' . $test->{pounds_cost});
-            $mech->content_contains('1 bin');
-            $mech->submit_form_ok({ with_fields => { goto => 'details' } });
-            $mech->content_contains('<span id="cost_pa">' . $test->{pounds_cost});
-            $mech->content_contains('<span id="cost_now">' . $test->{pounds_cost});
-            $mech->submit_form_ok({ with_fields => {
-                current_bins => 0,
-                bins_wanted => 1,
-                payment_method => 'credit_card',
-                name => 'Test McTest',
-                email => 'test@example.net'
-            } });
-            # external redirects make Test::WWW::Mechanize unhappy so clone
-            # the mech for the redirect
-            my $mech2 = $mech->clone;
-            $mech2->content_contains('Continue to payment', 'Waste features text_for_waste_payment not used for non-staff payment');
-            $mech2->submit_form_ok({ with_fields => { tandc => 1 } });
-
-            is $mech2->res->previous->code, 302, 'payments issues a redirect';
-            is $mech2->res->previous->header('Location'), "http://example.org/faq", "redirects to payment gateway";
-
-            my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
-
-            is $sent_params->{items}[0]{amount}, $test->{pence_cost}, 'correct amount used';
-            check_extra_data_pre_confirm($new_report, new_bin_type => 1, new_quantity => 1);
-
-            $mech->get('/waste/pay/xx/yyyyyyyyyyy');
-            ok !$mech->res->is_success(), "want a bad response";
-            is $mech->res->code, 404, "got 404";
-            $mech->get("/waste/pay_complete/$report_id/NOTATOKEN");
-            ok !$mech->res->is_success(), "want a bad response";
-            is $mech->res->code, 404, "got 404";
-            $mech->get_ok("/waste/pay_complete/$report_id/$token?STATUS=9&PAYID=54321");
-
-            check_extra_data_post_confirm($new_report);
-
-            $mech->content_like(qr#/waste/12345">Show upcoming#, "contains link to bin page");
-
-            FixMyStreet::Script::Reports::send();
-            my @emails = $mech->get_email;
-            my $body = $mech->get_text_body_from_email($emails[1]);
-            like $body, qr/Number of bin subscriptions: 1/;
-            like $body, qr/Bins to be delivered: 1/;
-            like $body, qr/Total:.*?$test->{pounds_cost}/;
-            $mech->clear_emails_ok;
         };
-    }
+        set_fixed_time("2021-$test->{month}-09T17:00:00Z");
+        $mech->get_ok('/waste/12345/garden');
+        $mech->submit_form_ok({ form_number => 1 });
+        $mech->submit_form_ok({ with_fields => { existing => 'no' } });
+        $mech->content_like(qr#Total to pay now: £<span[^>]*>0.00#, "initial cost set to zero");
+        $mech->submit_form_ok({ with_fields => {
+            current_bins => 0,
+            bins_wanted => 1,
+            payment_method => 'credit_card',
+            name => 'Test McTest',
+            email => 'test@example.net'
+        } });
+        $mech->content_contains('Test McTest');
+        $mech->content_contains('£' . $test->{pounds_cost});
+        $mech->content_contains('1 bin');
+        $mech->submit_form_ok({ with_fields => { goto => 'details' } });
+        $mech->content_contains('<span id="cost_pa">' . $test->{pounds_cost});
+        $mech->content_contains('<span id="cost_now">' . $test->{pounds_cost});
+        $mech->submit_form_ok({ with_fields => {
+            current_bins => 0,
+            bins_wanted => 1,
+            payment_method => 'credit_card',
+            name => 'Test McTest',
+            email => 'test@example.net'
+        } });
+        $mech->content_contains('Continue to payment', 'Waste features text_for_waste_payment not used for non-staff payment');
+        $mech->content_contains('valid bin sticker', 'extra T&C text');
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
+
+        my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
+
+        is $sent_params->{items}[0]{amount}, $test->{pence_cost}, 'correct amount used';
+        check_extra_data_pre_confirm($new_report, new_bin_type => 1, new_quantity => 1);
+
+        $mech->get('/waste/pay/xx/yyyyyyyyyyy');
+        ok !$mech->res->is_success(), "want a bad response";
+        is $mech->res->code, 404, "got 404";
+        $mech->get("/waste/pay_complete/$report_id/NOTATOKEN");
+        ok !$mech->res->is_success(), "want a bad response";
+        is $mech->res->code, 404, "got 404";
+        $mech->get_ok("/waste/pay_complete/$report_id/$token?STATUS=9&PAYID=54321");
+
+        check_extra_data_post_confirm($new_report);
+
+        $mech->content_like(qr#/waste/12345">Show upcoming#, "contains link to bin page");
+
+        FixMyStreet::Script::Reports::send();
+        my @emails = $mech->get_email;
+        my $body = $mech->get_text_body_from_email($emails[1]);
+        like $body, qr/Number of bin subscriptions: 1/;
+        like $body, qr/Bins to be delivered: 1/;
+        like $body, qr/Total:.*?$test->{pounds_cost}/;
+        $mech->clear_emails_ok;
+    };
 
     set_fixed_time('2023-01-09T17:00:00Z'); # Set a date when garden service full price for most tests
 
@@ -330,14 +433,7 @@ FixMyStreet::override_config {
         } });
         $mech->content_contains('Test McTest');
         $mech->content_contains('£50.00');
-
-        # external redirects make Test::WWW::Mechanize unhappy so clone
-        # the mech for the redirect
-        my $mech2 = $mech->clone;
-        $mech2->submit_form_ok({ with_fields => { tandc => 1 } });
-
-        is $mech2->res->previous->code, 302, 'payments issues a redirect';
-        is $mech2->res->previous->header('Location'), "http://example.org/faq", "redirects to payment gateway";
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
 
@@ -369,14 +465,7 @@ FixMyStreet::override_config {
         } });
         $mech->content_contains('Test McTest');
         $mech->content_contains('£50.00');
-
-        # external redirects make Test::WWW::Mechanize unhappy so clone
-        # the mech for the redirect
-        my $mech2 = $mech->clone;
-        $mech2->submit_form_ok({ with_fields => { tandc => 1 } });
-
-        is $mech2->res->previous->code, 302, 'payments issues a redirect';
-        is $mech2->res->previous->header('Location'), "http://example.org/faq", "redirects to payment gateway";
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
 
@@ -395,6 +484,68 @@ FixMyStreet::override_config {
         like $body, qr/Total:.*?50.00/;
     };
 
+    $echo->mock('GetServiceUnitsForObject', \&garden_waste_one_bin);
+
+    subtest 'check new sub and resub email reminder opt-in' => sub {
+        $mech->get_ok('/waste/12345/garden');
+        $mech->submit_form_ok({ form_number => 1 });
+        $mech->submit_form_ok({ with_fields => { existing => 'no' } });
+        $mech->submit_form_ok({ with_fields => {
+                current_bins => 2,
+                bins_wanted => 1,
+                payment_method => 'credit_card',
+                name => 'Test McTest',
+                email => 'test@example.net',
+                email_renewal_reminders => 'Yes'
+        } });
+        $mech->content_contains('Email notifications');
+        $mech->content_contains('Upcoming renewal reminders');
+        $mech->content_contains('Yes');
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
+
+        my ( $sub_token, $sub_report, $sub_report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
+        $mech->get_ok("/waste/pay_complete/$sub_report_id/$sub_token?STATUS=9&PAYID=54321");
+        is $sub_report->get_extra_field_value('email_renewal_reminders_opt_in'), "Y", "opt-in flag set on sub report";
+
+        set_fixed_time('2021-03-09T17:00:00Z');
+        $mech->get_ok('/waste/12345/garden_renew');
+        $mech->submit_form_ok({ form_number => 1 });
+        $mech->submit_form_ok({ with_fields => {
+                current_bins => 2,
+                bins_wanted => 1,
+                payment_method => 'credit_card',
+                name => 'Test McTest',
+                email => 'test@example.net',
+                email_renewal_reminders => 'No'
+        } });
+        $mech->content_contains('Email notifications');
+        $mech->content_contains('Upcoming renewal reminders');
+        $mech->content_contains('No');
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
+
+        my ( $renew_token, $renew_report, $renew_report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
+        $mech->get_ok("/waste/pay_complete/$renew_report_id/$renew_token");
+        is $renew_report->get_extra_field_value('email_renewal_reminders_opt_in'), "N", "opt-in flag set on renew report";
+
+        $mech->log_in_ok($staff_user->email);
+        $mech->get_ok('/dashboard?export=1');
+        my @rows = $mech->content_as_csv;
+        my $idx = firstidx { $_ eq 'Email Renewal Reminders Opt-In' } @{$rows[0]};
+        isnt $idx, -1, "CSV export contains column for opt-in";
+
+        my $sub_opt_in = @{$rows[-2]}[$idx];
+        is $sub_opt_in, "Y", "opt-in is true on sub in CSV export";
+
+        my $renew_opt_in = @{$rows[-1]}[$idx];
+        is $renew_opt_in, "N", "opt-in is false on renew in CSV export";
+    };
+
+    # Flush emails.
+    FixMyStreet::Script::Reports::send();
+    $mech->clear_emails_ok;
+
+    $echo->mock('GetServiceUnitsForObject', \&garden_waste_no_bins);
+
     subtest 'check new staff subscription of sacks' => sub {
         $mech->log_in_ok($staff_user->email);
         $mech->get_ok('/waste/12345/garden');
@@ -408,13 +559,17 @@ FixMyStreet::override_config {
         $mech->content_contains('£50.00');
         $mech->content_contains('Payment processed');
         $mech->submit_form_ok({ with_fields => { tandc => 1 } });
-        $mech->submit_form_ok({ with_fields => { payenet_code => 54321 }});
 
-        my $content = $mech->content;
-        my ($report_id) = ($content =~ m#reference number is <strong>(\d+)<#);
-        $mech->content_contains('Changes to your subscription will show up within 24 hours', 'Sack text manages expectations');
-        my $report = FixMyStreet::DB->resultset("Problem")->find({ id => $report_id });
-        check_extra_data_pre_confirm($report, new_bins => 0, payment_method => 'csc', state => 'confirmed', bin_type => 2);
+        is $mech->res->previous->code, 302, 'payments issues a redirect';
+        is $mech->res->previous->header('Location'), 'http://paye.example.org/faq?apnReference=4ab5f886-de7d-4f5b-bbd8-42151a5deb82', "redirects to payment gateway";
+
+        my ( $token, $report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
+
+        is $sent_params->{items}[0]{amount}, 5000, 'correct amount used';
+        check_extra_data_pre_confirm($report, new_bins => 0, bin_type => 2, ref_type => 'apn');
+        $mech->get_ok("/waste/pay_complete/$report_id/$token");
+
+        $report->discard_changes;
         is $report->get_extra_field_value('LastPayMethod'), 1, 'correct echo payment method field';
         is $report->get_extra_field_value('PaymentCode'), '54321', 'correct echo payment reference field';
         is $report->get_extra_metadata('payment_reference'), '54321', 'correct payment reference on report';
@@ -425,6 +580,31 @@ FixMyStreet::override_config {
         my $body = $mech->get_text_body_from_email($emails[1]);
         like $body, qr/Garden waste sack collection: 1/;
         like $body, qr/Total:.*?50.00/;
+    };
+
+    subtest 'cancel garden service' => sub {
+        $echo->mock('GetServiceUnitsForObject', \&garden_waste_one_bin);
+        set_fixed_time('2021-03-09T17:00:00Z');
+        $mech->log_in_ok($user->email);
+        $mech->get_ok('/waste/12345/garden_cancel');
+        $mech->submit_form_ok({ with_fields => { confirm => 1 } });
+
+        my $new_report = FixMyStreet::DB->resultset('Problem')->search(
+            { user_id => $user->id },
+        )->order_by('-id')->first;
+
+        is $new_report->get_extra_field_value('End_Date'), '2021-03-09', 'cancel date set to current date';
+        is $new_report->category, 'Cancel Garden Subscription', 'correct category on report';
+        is $new_report->state, 'confirmed', 'report confirmed';
+
+        $mech->clear_emails_ok;
+        FixMyStreet::Script::Reports::send();
+        my @emails = $mech->get_email;
+        my $body = $mech->get_text_body_from_email($emails[1]);
+
+        like $body, qr/You have cancelled your garden waste collection service/;
+        unlike $body, qr/Number of bin subscriptions/;
+        unlike $body, qr/Bins to be delivered/;
     };
 
     $echo->mock('GetServiceUnitsForObject', \&garden_waste_one_bin);
@@ -443,12 +623,17 @@ FixMyStreet::override_config {
         $mech->content_contains('£50.00');
         $mech->content_contains('Payment processed');
         $mech->submit_form_ok({ with_fields => { tandc => 1 } });
-        $mech->submit_form_ok({ with_fields => { payenet_code => 54321 }});
 
-        my $content = $mech->content;
-        my ($report_id) = ($content =~ m#reference number is <strong>(\d+)<#);
-        my $report = FixMyStreet::DB->resultset("Problem")->find({ id => $report_id });
-        check_extra_data_pre_confirm($report, type => 'Renew', new_bins => 0, payment_method => 'csc', state => 'confirmed', bin_type => 2);
+        is $mech->res->previous->code, 302, 'payments issues a redirect';
+        is $mech->res->previous->header('Location'), 'http://paye.example.org/faq?apnReference=4ab5f886-de7d-4f5b-bbd8-42151a5deb82', "redirects to payment gateway";
+
+        my ( $token, $report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
+
+        is $sent_params->{items}[0]{amount}, 5000, 'correct amount used';
+        check_extra_data_pre_confirm($report, type => 'Renew', new_bins => 0, bin_type => 2, ref_type => 'apn');
+        $mech->get_ok("/waste/pay_complete/$report_id/$token");
+
+        $report->discard_changes;
         is $report->get_extra_field_value('LastPayMethod'), 1, 'correct echo payment method field';
         is $report->get_extra_field_value('PaymentCode'), '54321', 'correct echo payment reference field';
         is $report->get_extra_metadata('payment_reference'), '54321', 'correct payment reference on report';
@@ -457,18 +642,79 @@ FixMyStreet::override_config {
         FixMyStreet::Script::Reports::send();
         my @emails = $mech->get_email;
         my $body = $mech->get_text_body_from_email($emails[1]);
+        # The report's created field isn't being populated according to set_fixed_time so checking against the field directly instead.
+        my $expected_renewal_end_year = $report->created->year + 1;
+        like $body, qr/Your subscription will last until the end of March $expected_renewal_end_year/;
         like $body, qr/Garden waste sack collection: 1/;
         like $body, qr/Total:.*?50.00/;
     };
 
-    for my $test(
+    for my $test (
         {
-            box_ticked => 1,
-            cost => '£20.00',
-            cost_pence => '2000',
-            description => '20 per cent off half price with checkbox ticked',
-            date => '2023-10-09T17:00:00Z',
+            'bins_wanted' => 3,
+            'container_type' => 1,
+            'container_quantity' => 1,
+            cost => 5000,
         },
+        {
+            'bins_wanted' => 4,
+            'container_type' => 1,
+            'container_quantity' => 2,
+            cost => 10000,
+        },
+        {
+            'bins_wanted' => 1,
+            'container_type' => '',
+            'container_quantity' => '',
+        },
+    ) {
+        subtest 'check modifying Green Garden Waste as staff' => sub {
+            $mech->log_in_ok($staff_user->email);
+            set_fixed_time('2020-12-09T17:00:00Z'); # Before renewal is due so we can modify
+            $echo->mock('GetServiceUnitsForObject', \&garden_waste_two_bins);
+            $mech->get_ok('/waste/12345');
+            $mech->content_contains('Change your garden waste subscription');
+            $mech->get_ok('/waste/12345/garden_modify');
+            $mech->submit_form_ok({ with_fields => { task => 'modify' }}, 'Choose modify');
+            $mech->submit_form_ok({ with_fields => {
+                bins_wanted => $test->{bins_wanted},
+                name => $user->name,
+                email => $user->email
+                } }, 'Request '. $test->{bins_wanted} . ' bins when currently have 2');
+            $mech->submit_form_ok({ with_fields => { tandc => 1 }}, 'Submit request');
+
+            my $report = FixMyStreet::DB->resultset('Problem')->find({category => 'Amend Garden Subscription'});
+            my %check = (
+                type => 'Amend',
+                category => 'Amend Garden Subscription',
+                quantity => $test->{bins_wanted},
+                new_quantity => $test->{container_quantity},
+                new_bin_type => $test->{container_type},
+                bin_type => undef,
+                ref_type => 'apn',
+            );
+            if ($test->{bins_wanted} > 2) {
+                is $mech->res->previous->code, 302, 'payments issues a redirect';
+                is $mech->res->previous->header('Location'), 'http://paye.example.org/faq?apnReference=4ab5f886-de7d-4f5b-bbd8-42151a5deb82', "redirects to payment gateway";
+                is $sent_params->{items}[0]{amount}, $test->{cost}, 'correct amount used';
+                check_extra_data_pre_confirm($report, %check);
+            } else {
+                check_extra_data_pre_confirm($report, %check, state => 'confirmed', payment_method => 'csc');
+            }
+
+            $report->delete;
+        };
+    };
+
+    subtest 'check modifying Green Garden Waste not available for user' => sub {
+            $mech->log_in_ok($user->email);
+            set_fixed_time('2021-01-09T17:00:00Z'); # Before renewal is due so we can modify
+            $echo->mock('GetServiceUnitsForObject', \&garden_waste_two_bins);
+            $mech->get_ok('/waste/12345');
+            $mech->content_lacks('Change your garden waste subscription');
+    };
+
+    for my $test(
         {
             box_ticked => 1,
             cost => '£40.00',
@@ -569,13 +815,17 @@ FixMyStreet::override_config {
                 set_fixed_time('2021-03-09T17:00:00Z');
                 $mech->log_in_ok($staff_user->email);
                 $mech->get_ok('/waste/12345/garden_renew');
-                $mech->submit_form_ok({ with_fields => { container_choice => 'bin' } });
+                $mech->submit_form_ok({ with_fields => {
+                    container_choice => 'bin',
+                    apply_discount => 1,
+                     } });
+                $mech->content_contains('data-per_bin_cost="'. $test->{cost_pence} . '"', 'Correct per_bin_cost discount in template for waste.js calculations');
+                $mech->content_contains('Total per year: £<span id="cost_pa">' . $test->{cost_pence} / 100, 'Correct discount in template before js calculations take over');
                 $mech->submit_form_ok({ with_fields => {
                     current_bins => 1,
                     bins_wanted => 1,
                     name => 'Test McTest',
                     email => 'test@example.net',
-                    apply_discount => 1,
                     } }), ;
                 $mech->content_contains($test->{cost}, $test->{description});
                 $mech->submit_form_ok({ with_fields => {
@@ -623,10 +873,12 @@ sub check_extra_data_pre_confirm {
         payment_method => 'credit_card',
         new_quantity => '',
         new_bin_type => '',
+        ref_type => 'scp',
+        category => 'Garden Subscription',
         @_
     );
     $report->discard_changes;
-    is $report->category, 'Garden Subscription', 'correct category on report';
+    is $report->category, $params{category}, 'correct category on report';
     is $report->title, "Garden Subscription - $params{type}", 'correct title on report';
     is $report->get_extra_field_value('payment_method'), $params{payment_method}, 'correct payment method on report';
     is $report->get_extra_field_value('Paid_Collection_Container_Quantity'), $params{quantity}, 'correct bin count';
@@ -635,7 +887,11 @@ sub check_extra_data_pre_confirm {
     is $report->get_extra_field_value('Container_Type'), $params{new_bin_type}, 'correct bin type';
     is $report->state, $params{state}, 'report state correct';
     if ($params{state} eq 'unconfirmed') {
-        is $report->get_extra_metadata('scpReference'), '12345', 'correct scp reference on report';
+        if ($params{ref_type} eq 'apn') {
+            is $report->get_extra_metadata('apnReference'), '4ab5f886-de7d-4f5b-bbd8-42151a5deb82', 'correct scp reference on report';
+        } else {
+            is $report->get_extra_metadata('scpReference'), '12345', 'correct scp reference on report';
+        }
     }
 }
 

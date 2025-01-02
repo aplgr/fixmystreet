@@ -28,11 +28,14 @@ $primary: $gray-2;
 $primary_b: $gray-1;
 $primary_text: $gray-1;
 $subtext: $gray-2;
-$error-color: $red;
+$error_color: $red;
 $base_bg: $white;
 $base_fg: $gray-3;
 // From here https://www.southwark.gov.uk/myarea
 $mainform_bg: $white-2;
+$postcodeform-background-desktop: $mainform_bg;
+$postcodeform-background: $mainform_bg;
+$form-hint-color-desktop: $gray-2;
 
 /* 
 IMPORTANT
@@ -234,6 +237,9 @@ $col_big_numbers: $primary_b;
 $pagination_background: $white;
 $itemlist_item_background: $white-2;
 $itemlist_item_background_hover: $blue-l1;
+
+$mobile-sticky-sidebar-button-bg: $blue;
+$mobile-sticky-sidebar-button-menu-image: "menu-white";
 
 /* 
 If you want to enable the sticky side bar on the help page

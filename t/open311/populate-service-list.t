@@ -1,4 +1,6 @@
-#!/usr/bin/env perl
+use FixMyStreet;
+BEGIN { FixMyStreet->test_mode(1); }
+
 package FixMyStreet::Cobrand::Tester;
 
 use parent 'FixMyStreet::Cobrand::Default';
@@ -10,7 +12,6 @@ package main;
 use FixMyStreet::TestMech;
 use FixMyStreet::DB;
 use Test::Warn;
-use utf8;
 
 use_ok( 'Open311::PopulateServiceList' );
 use_ok( 'Open311' );
@@ -20,12 +21,12 @@ my $mech = FixMyStreet::TestMech->new;
 my $processor = Open311::PopulateServiceList->new();
 ok $processor, 'created object';
 
-my $body = $mech->create_body_ok(1, 'Body Numero Uno', {}, { cobrand => 'tester' });
+my $body = $mech->create_body_ok(1, 'Body Numero Uno', { cobrand => 'tester' });
 
 my $BROMLEY = 'Bromley Council';
-my $bromley = $mech->create_body_ok(2482, $BROMLEY, {}, { cobrand => 'bromley' });
+my $bromley = $mech->create_body_ok(2482, $BROMLEY, { cobrand => 'bromley' });
 
-my $bucks = $mech->create_body_ok(163793, 'Buckinghamshire Council', {}, { cobrand => 'buckinghamshire' });
+my $bucks = $mech->create_body_ok(163793, 'Buckinghamshire Council', { cobrand => 'buckinghamshire' });
 
 for my $test (
     { desc => 'groups not set for new contacts', enable_groups => 0, groups => 0, delete => 1 },
@@ -568,6 +569,140 @@ subtest 'check existing category marked waste' => sub {
     is $contact->get_extra_metadata('type'), 'waste', 'contact marked as waste in extra';
 };
 
+subtest 'check new category marked inactive' => sub {
+    FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->delete();
+
+    my $services_xml = '<?xml version="1.0" encoding="utf-8"?>
+    <services>
+      <service>
+        <service_code>100</service_code>
+        <service_name>Cans left out 24x7</service_name>
+        <description>Garbage or recycling cans that have been left out for more than 24 hours after collection. Violators will be cited.</description>
+        <metadata>false</metadata>
+        <type>realtime</type>
+        <keywords>inactive</keywords>
+        <group>sanitation</group>
+      </service>
+    </services>
+        ';
+
+    my $service_list = get_xml_simple_object( $services_xml );
+
+    my $processor = Open311::PopulateServiceList->new();
+    $processor->_current_body( $body );
+    $processor->process_services( $service_list );
+
+    my $contact_count = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->count();
+    is $contact_count, 1, 'correct number of contacts';
+
+    my $contact = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->first;
+    is $contact->email, '100', 'email correct';
+    is $contact->category, 'Cans left out 24x7', 'category correct';
+    is $contact->state, 'inactive', 'contact marked as inactive';
+};
+
+subtest 'check existing category marked inactive' => sub {
+    my $contact = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->first;
+    $contact->update({
+        state => 'confirmed'
+    });
+    is $contact->state, 'confirmed', 'contact not marked as inactive';
+
+    my $services_xml = '<?xml version="1.0" encoding="utf-8"?>
+    <services>
+      <service>
+        <service_code>100</service_code>
+        <service_name>Cans left out 24x7</service_name>
+        <description>Garbage or recycling cans that have been left out for more than 24 hours after collection. Violators will be cited.</description>
+        <metadata>false</metadata>
+        <type>realtime</type>
+        <keywords>inactive</keywords>
+        <group>sanitation</group>
+      </service>
+    </services>
+        ';
+
+    my $service_list = get_xml_simple_object( $services_xml );
+
+    my $processor = Open311::PopulateServiceList->new();
+    $processor->_current_body( $body );
+    $processor->process_services( $service_list );
+
+    my $contact_count = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->count();
+    is $contact_count, 1, 'correct number of contacts';
+
+    $contact->discard_changes;
+    is $contact->email, '100', 'email correct';
+    is $contact->category, 'Cans left out 24x7', 'category correct';
+    is $contact->state, 'inactive', 'contact changed to inactive';
+};
+
+subtest 'check existing inactive category does not get marked active' => sub {
+    my $contact = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->first;
+    is $contact->state, 'inactive', 'contact marked as inactive';
+
+    my $services_xml = '<?xml version="1.0" encoding="utf-8"?>
+    <services>
+      <service>
+        <service_code>100</service_code>
+        <service_name>Cans left out 24x7</service_name>
+        <description>Garbage or recycling cans that have been left out for more than 24 hours after collection. Violators will be cited.</description>
+        <metadata>false</metadata>
+        <type>realtime</type>
+        <keywords></keywords>
+        <group>sanitation</group>
+      </service>
+    </services>
+        ';
+
+    my $service_list = get_xml_simple_object( $services_xml );
+
+    my $processor = Open311::PopulateServiceList->new();
+    $processor->_current_body( $body );
+    $processor->process_services( $service_list );
+
+    my $contact_count = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->count();
+    is $contact_count, 1, 'correct number of contacts';
+
+    $contact->discard_changes;
+    is $contact->email, '100', 'email correct';
+    is $contact->category, 'Cans left out 24x7', 'category correct';
+    is $contact->state, 'inactive', 'contact remains inactive';
+};
+
+subtest 'check existing category gets marked as staff' => sub {
+    my $contact = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->first;
+    is $contact->state, 'inactive', 'contact marked as inactive';
+
+    my $services_xml = '<?xml version="1.0" encoding="utf-8"?>
+    <services>
+      <service>
+        <service_code>100</service_code>
+        <service_name>Cans left out 24x7</service_name>
+        <description>Garbage or recycling cans that have been left out for more than 24 hours after collection. Violators will be cited.</description>
+        <metadata>false</metadata>
+        <type>realtime</type>
+        <keywords>staff</keywords>
+        <group>sanitation</group>
+      </service>
+    </services>
+        ';
+
+    my $service_list = get_xml_simple_object( $services_xml );
+
+    my $processor = Open311::PopulateServiceList->new();
+    $processor->_current_body( $body );
+    $processor->process_services( $service_list );
+
+    my $contact_count = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->count();
+    is $contact_count, 1, 'correct number of contacts';
+
+    $contact->discard_changes;
+    is $contact->email, '100', 'email correct';
+    is $contact->category, 'Cans left out 24x7', 'category correct';
+    is $contact->state, 'staff', 'contact is staff';
+};
+
 for my $test (
     {
         desc => 'check meta data added to existing contact',
@@ -1015,8 +1150,6 @@ subtest 'check attribute ordering' => sub {
         },
     ];
 
-    $contact->discard_changes;
-
     is_deeply $contact->get_extra_fields, $extra, 'meta data re-ordered correctly';
 };
 
@@ -1122,8 +1255,6 @@ subtest 'check Bromley skip code' => sub {
             description => 'Right of way reference'
     } ];
 
-    $contact->discard_changes;
-
     is_deeply $contact->get_extra_fields, $extra, 'only non std bromley meta data saved';
 
     FixMyStreet::override_config {
@@ -1173,8 +1304,6 @@ subtest 'check Bromley skip code' => sub {
             description => 'Easting',
         },
     ];
-
-    $contact->discard_changes;
 
     is_deeply $contact->get_extra_fields, $extra, 'all meta data saved for non bromley';
 };
@@ -1245,7 +1374,6 @@ subtest 'check Buckinghamshire extra code' => sub {
         ],
     } ];
 
-    $contact->discard_changes;
     is_deeply $contact->get_extra_fields, $extra, 'extra Bucks field returned for flytipping';
 
     $processor->_current_service( { service_code => 100, service_name => 'Street lights' } );
@@ -1262,7 +1390,6 @@ subtest 'check Buckinghamshire extra code' => sub {
         description => 'Type of bin'
     } ];
 
-    $contact->discard_changes;
     is_deeply $contact->get_extra_fields, $extra, 'no extra Bucks field returned otherwise';
 };
 

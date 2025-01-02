@@ -2,10 +2,6 @@
 
 @import "../sass/layout";
 
-body.twothirdswidthpage .content .sticky-sidebar aside {
-    top: 10em;
-}
-
 #site-header {
     border-top: 7px solid $fuchsia;
 }
@@ -14,8 +10,8 @@ body.twothirdswidthpage .content .sticky-sidebar aside {
     width: 208px;
     height: 80px;
     padding: 24px 0;
-    background-position: 8px 50%;
-    background-size: 200px 80px;
+    background-position:0;
+    background-size: 208px auto;
 }
 
 #front_stats big {
@@ -37,7 +33,6 @@ body.twothirdswidthpage .content .sticky-sidebar aside {
         }
     }
     a.report-a-problem-btn,
-    span.report-a-problem-btn,
     span {
         background-color: $nav_hover_background_colour;
         color: $text_black;

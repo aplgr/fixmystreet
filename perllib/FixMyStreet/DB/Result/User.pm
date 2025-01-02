@@ -10,6 +10,7 @@ use warnings;
 use base 'DBIx::Class::Core';
 __PACKAGE__->load_components(
   "FilterColumn",
+  "+FixMyStreet::DB::JSONBColumn",
   "FixMyStreet::InflateColumn::DateTime",
   "FixMyStreet::EncodedColumn",
 );
@@ -24,48 +25,46 @@ __PACKAGE__->add_columns(
   },
   "email",
   { data_type => "text", is_nullable => 1 },
+  "email_verified",
+  { data_type => "boolean", default_value => \"false", is_nullable => 0 },
   "name",
   { data_type => "text", is_nullable => 1 },
   "phone",
   { data_type => "text", is_nullable => 1 },
+  "phone_verified",
+  { data_type => "boolean", default_value => \"false", is_nullable => 0 },
   "password",
   { data_type => "text", default_value => "", is_nullable => 0 },
-  "flagged",
-  { data_type => "boolean", default_value => \"false", is_nullable => 0 },
   "from_body",
   { data_type => "integer", is_foreign_key => 1, is_nullable => 1 },
-  "title",
-  { data_type => "text", is_nullable => 1 },
-  "facebook_id",
-  { data_type => "bigint", is_nullable => 1 },
-  "twitter_id",
-  { data_type => "bigint", is_nullable => 1 },
+  "flagged",
+  { data_type => "boolean", default_value => \"false", is_nullable => 0 },
   "is_superuser",
-  { data_type => "boolean", default_value => \"false", is_nullable => 0 },
-  "extra",
-  { data_type => "text", is_nullable => 1 },
-  "email_verified",
-  { data_type => "boolean", default_value => \"false", is_nullable => 0 },
-  "phone_verified",
   { data_type => "boolean", default_value => \"false", is_nullable => 0 },
   "created",
   {
     data_type     => "timestamp",
-    default_value => \"current_timestamp",
+    default_value => \"CURRENT_TIMESTAMP",
     is_nullable   => 0,
-    original      => { default_value => \"now()" },
   },
   "last_active",
   {
     data_type     => "timestamp",
-    default_value => \"current_timestamp",
+    default_value => \"CURRENT_TIMESTAMP",
     is_nullable   => 0,
-    original      => { default_value => \"now()" },
   },
-  "area_ids",
-  { data_type => "integer[]", is_nullable => 1 },
+  "title",
+  { data_type => "text", is_nullable => 1 },
+  "twitter_id",
+  { data_type => "bigint", is_nullable => 1 },
+  "facebook_id",
+  { data_type => "bigint", is_nullable => 1 },
   "oidc_ids",
   { data_type => "text[]", is_nullable => 1 },
+  "area_ids",
+  { data_type => "integer[]", is_nullable => 1 },
+  "extra",
+  { data_type => "jsonb", is_nullable => 1 },
 );
 __PACKAGE__->set_primary_key("id");
 __PACKAGE__->add_unique_constraint("users_facebook_id_key", ["facebook_id"]);
@@ -131,16 +130,25 @@ __PACKAGE__->has_many(
 );
 
 
-# Created by DBIx::Class::Schema::Loader v0.07035 @ 2019-06-20 16:31:44
-# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:Ryb6giJm/7N7svg/d+2GeA
+# Created by DBIx::Class::Schema::Loader v0.07035 @ 2024-10-21 23:30:33
+# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:6mJOWug7xqA+QvHY4ch4UA
+
+__PACKAGE__->has_many(
+  active_user_planned_reports => "FixMyStreet::DB::Result::UserPlannedReport",
+  sub {
+      my $args = shift;
+      return {
+          "$args->{foreign_alias}.user_id" => { -ident => "$args->{self_alias}.id" },
+          "$args->{foreign_alias}.removed" => undef,
+      };
+  },
+  { cascade_copy => 0, cascade_delete => 0 },
+);
 
 # These are not fully unique constraints (they only are when the *_verified
 # is true), but this is managed in ResultSet::User's find() wrapper.
 __PACKAGE__->add_unique_constraint("users_email_verified_key", ["email", "email_verified"]);
 __PACKAGE__->add_unique_constraint("users_phone_verified_key", ["phone", "phone_verified"]);
-
-__PACKAGE__->load_components("+FixMyStreet::DB::RABXColumn");
-__PACKAGE__->rabx_column('extra');
 
 use Moo;
 use Text::CSV;
@@ -149,7 +157,7 @@ use FixMyStreet::SMS;
 use mySociety::EmailUtil;
 use namespace::clean -except => [ 'meta' ];
 
-with 'FixMyStreet::Roles::Extra';
+with 'FixMyStreet::Roles::DB::Extra';
 
 __PACKAGE__->many_to_many( planned_reports => 'user_planned_reports', 'report' );
 __PACKAGE__->many_to_many( roles => 'user_roles', 'role' );
@@ -247,10 +255,16 @@ sub alert_updates_by {
     return 'email';
 }
 
+# Whether user has opted to receive questionnaires.
+# Defaults to true if not set in extra metadata.
+sub questionnaire_notify {
+    return $_[0]->get_extra_metadata('questionnaire_notify') // 1;
+}
+
 sub latest_anonymity {
     my $self = shift;
-    my $p = $self->problems->search(undef, { rows => 1, order_by => { -desc => 'id' } } )->first;
-    my $c = $self->comments->search(undef, { rows => 1, order_by => { -desc => 'id' } } )->first;
+    my $p = $self->problems->order_by('-id')->search(undef, { rows => 1 } )->first;
+    my $c = $self->comments->order_by('-id')->search(undef, { rows => 1 } )->first;
     my $p_created = $p ? $p->created->epoch : 0;
     my $c_created = $c ? $c->created->epoch : 0;
     my $obj = $p_created >= $c_created ? $p : $c;
@@ -261,9 +275,7 @@ sub latest_visible_problem {
     my $self = shift;
     return $self->problems->search({
         state => [ FixMyStreet::DB::Result::Problem->visible_states() ]
-    }, {
-        order_by => { -desc => 'id' }
-    })->first;
+    })->order_by('-id')->first;
 }
 
 =head2 check_for_errors
@@ -427,6 +439,7 @@ sub remove_staff {
     $self->user_roles->delete;
     $self->admin_user_body_permissions->delete;
     $self->from_body(undef);
+    $self->user_planned_reports->active->remove();
     $self->area_ids(undef);
 }
 
@@ -523,27 +536,22 @@ sub has_permission_to {
 
 =head2 has_body_permission_to
 
-Checks if the User has a from_body set, the specified permission on that body,
-and optionally that their from_body is one particular body.
+Checks if the User has a from_body set and the specified permission on that
+body. Instead of saying:
 
-Instead of saying:
-
-    ($user->from_body && $user->from_body->id == $body_id && $user->has_permission_to('user_edit', $body_id))
+    ($user->from_body && $user->has_permission_to('user_edit', $user->from_body->id))
 
 You can just say:
 
-    $user->has_body_permission_to('user_edit', $body_id)
+    $user->has_body_permission_to('user_edit')
 
 =cut
 
 sub has_body_permission_to {
-    my ($self, $permission_type, $body_id) = @_;
+    my ($self, $permission_type) = @_;
 
     return 1 if $self->is_superuser;
-
     return unless $self->from_body;
-    return if $body_id && $self->from_body->id != $body_id;
-
     return $self->has_permission_to($permission_type, $self->from_body->id);
 }
 
@@ -653,19 +661,10 @@ sub active_planned_reports {
     $self->planned_reports->search({ removed => undef });
 }
 
-has active_user_planned_reports => (
-    is => 'ro',
-    lazy => 1,
-    default => sub {
-        my $self = shift;
-        [ $self->user_planned_reports->search({ removed => undef })->all ];
-    },
-);
-
 sub is_planned_report {
     my ($self, $problem) = @_;
     my $id = $problem->id;
-    return scalar grep { $_->report_id == $id } @{$self->active_user_planned_reports};
+    return scalar grep { $_->report_id == $id } $self->active_user_planned_reports->all;
 }
 
 has categories => (

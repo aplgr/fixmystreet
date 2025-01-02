@@ -12,6 +12,8 @@ requires 'Test::Differences', '0.67'; # [3]
 # Minimum versions of dependencies to upgrade for bugfixes
 requires 'CGI', '4.43';
 requires 'Net::Server', '2.009';
+requires 'XML::LibXML', '2.0210';
+requires 'PkgConfig'; # If you don't have pkg-config installed, XML::LibXML won't install
 # For perl 5.20/5.22 support
   requires 'Guard', '1.023';
   requires 'PadWalker', '2.2';
@@ -31,6 +33,8 @@ requires 'Net::Server', '2.009';
   requires 'MooseX::Traits::Pluggable', '0.12';
 # For OpenSSL 3 support
   requires 'Crypt::OpenSSL::RSA', '0.33';
+# For perl 5.38 deprecations
+  requires 'Carp::Assert', '0.22';
 
 # Catalyst itself, and modules/plugins used
 requires 'Catalyst', '5.90124';
@@ -57,7 +61,7 @@ requires 'Crypt::Eksblowfish::Bcrypt';
 requires 'Crypt::JWT';
 requires 'Crypt::Digest::SHA256';
 requires 'Data::Password::Common';
-requires 'DateTime', '1.51';
+requires 'DateTime', '1.65';
 requires 'DateTime::Format::Flexible';
 requires 'DateTime::Format::HTTP';
 requires 'DateTime::Format::ISO8601';
@@ -86,8 +90,6 @@ requires 'FCGI'; # Required by e.g. Plack::Handler::FCGI
 requires 'File::Find';
 requires 'File::Path';
 requires 'Geo::OLC';
-requires 'Geography::NationalGrid',
-    mirror => 'https://cpan.metacpan.org/';
 requires 'Getopt::Long', '2.52';
 requires 'Getopt::Long::Descriptive', '0.105';
 requires 'HTML::Entities';
@@ -145,6 +147,8 @@ feature 'uk', 'FixMyStreet.com specific requirements' => sub {
     requires 'Net::Subnet';
     # Bromley
     requires 'Data::ICal';
+    # Echo
+    requires 'UUID::Tiny';
 };
 
 feature 'zurich', 'Zueri wie neu specific requirements' => sub {
@@ -164,7 +168,7 @@ requires 'Algorithm::Diff';
 # Modules used by CSS & watcher
 requires 'CSS::Sass';
 requires 'File::ChangeNotify', '0.31';
-requires 'Path::Tiny', '0.104';
+requires 'Path::Tiny', '0.144';
 requires 'File::Find::Rule';
 
 # Modules used for development
@@ -173,6 +177,8 @@ requires 'Plack::Middleware::Debug';
 requires 'Plack::Middleware::Debug::DBIC::QueryLog';
 requires 'Plack::Middleware::Debug::LWP';
 requires 'Plack::Middleware::Debug::Template';
+requires 'Term::ReadLine';
+requires 'Term::ReadLine::Gnu';
 recommends 'Linux::Inotify2' if $^O eq 'linux';
 recommends 'Mac::FSEvents' if $^O eq 'darwin';
 

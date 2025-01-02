@@ -9,6 +9,8 @@ use Path::Tiny;
 use Time::Piece;
 use FixMyStreet::DateRange;
 use FixMyStreet::Reporting;
+use List::Util qw(uniq);
+use List::MoreUtils qw(part);
 
 BEGIN { extends 'Catalyst::Controller'; }
 
@@ -91,6 +93,9 @@ sub check_page_allowed : Private {
                 $body = $found[0] if @found;
             }
         }
+        if ($body == $c->user->from_body and $c->cobrand->can('dashboard_default_body')) {
+            return $c->cobrand->call_hook('dashboard_default_body');
+        }
     } elsif ($c->action eq 'dashboard/heatmap' && $c->cobrand->feature('heatmap_dashboard_body')) {
         # Heatmap might be able to be seen by more people
         $body = $c->cobrand->call_hook('dashboard_body');
@@ -126,8 +131,29 @@ sub index : Path : Args(0) {
         $c->stash->{contacts} = [ $c->stash->{contacts}->all ];
         $c->forward('/report/stash_category_groups', [ $c->stash->{contacts} ]);
 
+        foreach (@{$c->stash->{category_groups}}) {
+            $_->{group_id} = "group-" . $_->{name};
+        }
+
+        my %group_names = map { $_->{name} => $_->{categories} } @{$c->stash->{category_groups}};
         # See if we've had anything from the body dropdowns
-        $c->stash->{category} = $c->get_param('category');
+        $c->stash->{category} = [ $c->get_param_list('category') ];
+        my @remove_from_display;
+
+        foreach (@{$c->stash->{category}}) {
+            next unless /^group-(.*)/;
+            for my $contact (@{$group_names{$1}}) {
+                push @{ $c->stash->{category} }, $contact->category;
+                push @remove_from_display, $contact->category;
+            }
+        }
+
+        my %display_categories = map { $_ => 1 } @{$c->stash->{category}};
+        delete $display_categories{$_} for (@remove_from_display);
+        $c->stash->{display_categories} = \%display_categories;
+
+        @{$c->stash->{category}} = grep { $_ !~ /^group-/} @{$c->stash->{category}};
+
         $c->stash->{ward} = [ $c->get_param_list('ward') ];
 
         if ($c->user_exists) {
@@ -155,10 +181,14 @@ sub index : Path : Args(0) {
     my $reporting = $c->forward('construct_rs_filter', [ $c->get_param('updates') ]);
 
     if ( my $export = $c->get_param('export') ) {
-        $reporting->csv_parameters;
         if ($export == 1) {
             # Existing method, generate and serve
-            $reporting->generate_csv_http($c);
+            if ($reporting->premade_csv_exists) {
+                $reporting->filter_premade_csv_http($c);
+            } else {
+                $reporting->csv_parameters;
+                $reporting->generate_csv_http($c);
+            }
         } elsif ($export == 2) {
             # New offline method
             $reporting->kick_off_process;
@@ -174,7 +204,6 @@ sub index : Path : Args(0) {
         }
     } else {
         $c->forward('generate_grouped_data');
-        $self->generate_summary_figures($c);
     }
 }
 
@@ -183,7 +212,7 @@ sub construct_rs_filter : Private {
 
     my $reporting = FixMyStreet::Reporting->new(
         type => $updates ? 'updates' : 'problems',
-        category => $c->stash->{category},
+        category => $c->stash->{category} || [],
         state => $c->stash->{q_state},
         wards => $c->stash->{ward},
         body => $c->stash->{body} || undef,
@@ -265,6 +294,26 @@ sub generate_grouped_data : Private {
             my $bm = $map{$b} // $map{$state_map->{$b}};
             $am <=> $bm;
         } @rows;
+    } elsif ($group_by eq 'category+state' || $group_by eq 'category') {
+        @rows = ();
+        my @sorting_categories;
+        my %category_to_group;
+        for my $group (@{$c->stash->{category_groups}}) {
+            for my $category (@{$group->{categories}}) {
+                push @sorting_categories, $category->category;
+                if (!$category_to_group{$category->category}) {
+                    $category_to_group{$category->category} = $group->{name};
+                } else {
+                    $category_to_group{$category->category} = 'Multiple';
+                }
+            }
+        };
+        my ($single_group, $multiple_groups) = part { $category_to_group{$_} eq 'Multiple'} @sorting_categories;
+        my @multiple = sort (uniq(@$multiple_groups));
+
+        push @rows, @$single_group if $single_group;
+        push @rows, @multiple if scalar @multiple;
+        $c->stash->{category_to_group} = \%category_to_group;
     } else {
         @rows = sort @rows;
     }
@@ -273,40 +322,6 @@ sub generate_grouped_data : Private {
 
     $c->stash->{grouped} = \%grouped;
     $c->stash->{totals} = \%totals;
-}
-
-sub generate_summary_figures {
-    my ($self, $c) = @_;
-    my $state_map = $c->stash->{state_map};
-
-    # problems this month by state
-    $c->stash->{"summary_$_"} = 0 for values %$state_map;
-
-    $c->stash->{summary_open} = $c->stash->{objects_rs}->count;
-
-    my $params = $c->stash->{params};
-    $params = { map { my $n = $_; s/me\./problem\./ unless /me\.confirmed/; $_ => $params->{$n} } keys %$params };
-
-    my $comments = $c->model('DB::Comment')->to_body(
-        $c->stash->{body}
-    )->search(
-        {
-            %$params,
-            'me.id' => { 'in' => \"(select min(id) from comment where me.problem_id=comment.problem_id and problem_state not in ('', 'confirmed') group by problem_state)" },
-        },
-        {
-            join     => 'problem',
-            group_by => [ 'problem_state' ],
-            select   => [ 'problem_state', { count => 'me.id' } ],
-            as       => [ qw/problem_state count/ ],
-        }
-    );
-
-    while (my $comment = $comments->next) {
-        my $meta_state = $state_map->{$comment->problem_state};
-        next if $meta_state eq 'open';
-        $c->stash->{"summary_$meta_state"} += $comment->get_column('count');
-    }
 }
 
 sub status : Local : Args(0) {
@@ -365,13 +380,6 @@ sub csv : Local : Args(1) {
     $c->res->body($csv->openr_raw);
 }
 
-sub generate_body_response_time : Private {
-    my ( $self, $c ) = @_;
-
-    my $avg = $c->stash->{body}->calculate_average($c->cobrand->call_hook("body_responsiveness_threshold"));
-    $c->stash->{body_average} = $avg ? int($avg / 60 / 60 / 24 + 0.5) : 0;
-}
-
 sub heatmap : Local : Args(0) {
     my ($self, $c) = @_;
 
@@ -388,20 +396,22 @@ sub heatmap : Local : Args(0) {
     my $parameters = $c->forward( '/reports/load_problems_parameters');
 
     my $where = $parameters->{where};
+    # Filter includes order_by, rows, and a prefetch entry
     my $filter = $parameters->{filter};
+    # We don't need the rows, as we always want all reports
     delete $filter->{rows};
 
     $c->forward('heatmap_filters', [ $where ]);
 
-    # Load the relevant stuff for the sidebar as well
-    my $problems = $c->cobrand->problems;
-    $problems = $problems->to_body($body);
-    $problems = $problems->search($where, $filter);
-
-    $c->forward('heatmap_sidebar', [ $problems, $where ]);
-
     if ($c->get_param('ajax')) {
+        # Load the relevant stuff for the sidebar as well
+        my $problems = $c->cobrand->problems->to_body($body)->search($where, $filter);
+        $c->forward('heatmap_sidebar', [ $problems, $where ]);
+
         my @pins;
+        # We don't need any of the prefetched stuff now
+        delete $filter->{prefetch};
+        $problems = $c->cobrand->problems->to_body($body)->search($where, $filter);
         while ( my $problem = $problems->next ) {
             push @pins, $problem->pin_data('reports');
         }

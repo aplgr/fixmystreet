@@ -76,13 +76,12 @@ body.mappage {
 }
 
 body.frontpage {
-    @include linear-gradient(white 5%, #9adfef 65%);
+    background: linear-gradient(white 5%, #9adfef 65%);
 
     #site-logo {
         width: 300px;
         height: 55px;
         background-size: 275px 55px;
-        @include svg-background-image("/cobrands/fixamingata/images/site-logo");
     }
 
     #main-nav {
@@ -119,8 +118,6 @@ body.mappage {
     }
 }
 
-#postcodeForm { margin-left: -1em !important; margin-right: -1em !important; }
-
 .content footer .tablewrapper { background: #fff; }
 
 .nav-menu--main {
@@ -131,9 +128,7 @@ body.mappage {
     	 color: $primary_text;
     	 font-weight: bold;
     }
-    span.report-a-problem-btn {
-	display: none;
-    }
+
     a.report-a-problem-btn {
 	display: none;
     }
@@ -153,32 +148,13 @@ body.mappage {
     }
 }
 
-body.twothirdswidthpage {
-    .content {
-       aside {
-           background:#fff;
-       }
-    }
-}
-
 #front-main {
     margin: 1em 0 2em;
 }
 
-#postcodeForm  {
-    display: flex;
-    flex-direction: column;
-}
-
-#front-main #postcodeForm .form-hint {
+.postcode-form-box .form-hint {
     font-size: .9em;
     margin-top: .5em;
-}
-
-#front-main #geolocate_link {
-    border-color: rgb(34, 34, 34);
-    color: rgb(34, 34, 34);
-    font-size: .9em;
 }
 
 .nav-menu a:hover {
@@ -186,7 +162,7 @@ body.twothirdswidthpage {
     color: rgb(34, 34, 34);
 }
 
-.content {
+.content, .sticky-sidebar {
     margin-bottom: 2em;
 }
 

@@ -49,15 +49,8 @@ body.mappage {
 
 /* FRONTPAGE */
 #front-main {
-  color: $primary_b;
-  background: $front_main_bg;
   margin: 0 0 45px 0;
   padding: 4em 1em 3em 1em;
-  #postcodeForm {
-    div {
-      margin: 0;
-    }
-  }
 }
 
 #front_stats {
@@ -97,7 +90,7 @@ footer.council-footer {
     &--logos {
         .council-logo {
             display: block;
-            @include svg-background-image("/cobrands/northumberland/images/northumberland-logo-white");
+            background-image: url("/cobrands/northumberland/images/northumberland-logo-white.svg");
             background-size: 274px 42px;
             background-repeat: no-repeat;
             background-position: top left;

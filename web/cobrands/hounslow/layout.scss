@@ -2,10 +2,6 @@
 
 @import "../sass/layout";
 
-body.twothirdswidthpage .content .sticky-sidebar aside {
-    top: 10em;
-}
-
 #site-logo {
     width: 231px;
     height: 102px;
@@ -17,5 +13,12 @@ body.twothirdswidthpage .content .sticky-sidebar aside {
 .nav-menu--main {
     a:hover {
       color: $primary_text;
+    }
+}
+
+.alertpage .postcode-form-box {
+    color: #222;
+    .form-hint {
+        color: #222;
     }
 }

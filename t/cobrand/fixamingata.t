@@ -1,8 +1,8 @@
 use mySociety::Locale;
 
+use FixMyStreet::TestMech;
 use FixMyStreet::Script::Alerts;
 use FixMyStreet::Script::Reports;
-use FixMyStreet::TestMech;
 my $mech = FixMyStreet::TestMech->new;
 
 use t::Mock::Nominatim;
@@ -104,18 +104,6 @@ subtest "Test ajax decimal points" => sub {
 
         $mech->get_ok('/ajax/lookup_location?term=high+street');
         $mech->content_contains("Ed\xc3\xadnburgh");
-    };
-};
-
-subtest "check user details shown when staff user comments as themselves" => sub {
-    FixMyStreet::override_config {
-        ALLOWED_COBRANDS => [ 'fixamingata' ],
-    }, sub {
-        $user2->update({ from_body => $body });
-        $mech->get_ok('/report/' . $report->id);
-        my $update_meta = $mech->extract_update_metas;
-        like $update_meta->[0], qr/Body \(Commenter\) /;
-        $user2->update({ from_body => undef });
     };
 };
 

@@ -42,7 +42,7 @@ $button-border-radius: 0; // This var doesn't exist in other cobrands
 // Usage 
 /*
   .btn, .btn--primary, .btn--primary {
-      @include border-radius($button-border-radius);
+      border-radius: $button-border-radius;
       @include button-variant($bg-top: $button-primary-bg-top, $bg-bottom: $button-primary-bg-bottom, $border: $button-primary-border, $text: $button-primary-text, $hover-bg-bottom: $button-primary-hover-bg-bottom, $hover-bg-top: $button-primary-hover-bg-top, $hover-border: $button-primary-hover-border, $hover-text: $button-primary-hover-text);
   }
 */
@@ -57,6 +57,7 @@ $button-primary-hover-text: $primary_b;
 
 $geolocation-link: $primary_text;
 $geolocation-link-border: $geolocation-link;
+$geolocation-link-background-color: $base_fg;
 $form-box-inverse: true; 
 
 /* FONTS */
@@ -106,3 +107,11 @@ $col_big_numbers: $primary_b;
   -moz-box-shadow:    $x $y $blur $spread $color;
   box-shadow:         $x $y $blur $spread $color;
 }
+
+$front-main-color: $primary_text;
+$front-main-background: $hart_black;
+$postcodeform-background:$hart_black;
+
+$front-main-color-desktop: $primary_text;
+$front-main-container-background-desktop: $hart_black;
+$postcodeform-background-desktop:$hart_black;

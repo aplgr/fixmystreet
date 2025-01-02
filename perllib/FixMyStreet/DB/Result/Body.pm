@@ -10,6 +10,7 @@ use warnings;
 use base 'DBIx::Class::Core';
 __PACKAGE__->load_components(
   "FilterColumn",
+  "+FixMyStreet::DB::JSONBColumn",
   "FixMyStreet::InflateColumn::DateTime",
   "FixMyStreet::EncodedColumn",
 );
@@ -55,6 +56,8 @@ __PACKAGE__->add_columns(
   "deleted",
   { data_type => "boolean", default_value => \"false", is_nullable => 0 },
   "extra",
+  { data_type => "jsonb", is_nullable => 1 },
+  "cobrand",
   { data_type => "text", is_nullable => 1 },
 );
 __PACKAGE__->set_primary_key("id");
@@ -136,18 +139,15 @@ __PACKAGE__->has_many(
 );
 
 
-# Created by DBIx::Class::Schema::Loader v0.07035 @ 2019-05-23 18:03:28
-# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:9sFgYQ9qhnZNcz3kUFYuvg
-
-__PACKAGE__->load_components("+FixMyStreet::DB::RABXColumn");
-__PACKAGE__->rabx_column('extra');
+# Created by DBIx::Class::Schema::Loader v0.07035 @ 2024-10-21 23:30:33
+# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:Lrn1t6/ardCJxCpxH1U2Eg
 
 use Moo;
 use namespace::clean;
 use FixMyStreet::MapIt;
 
-with 'FixMyStreet::Roles::Translatable',
-     'FixMyStreet::Roles::Extra';
+with 'FixMyStreet::Roles::DB::Translatable',
+     'FixMyStreet::Roles::DB::Extra';
 
 sub _url {
     my ( $obj, $cobrand, $args ) = @_;
@@ -185,15 +185,36 @@ sub areas {
     return \%ids;
 }
 
+=head2 areas_practical
+
+Certain bodies will have associated areas for reasons such as out-of-area
+handling (edge cases, parks); whilst areas will return all areas in the
+database for a body, areas_practical should only return the areas you'd
+expect for the body.
+
+=cut
+
+sub areas_practical {
+    my $self = shift;
+    my @area_ids = sort keys %{$self->areas};
+
+    my $cobrand = $self->get_cobrand_handler;
+    $cobrand ||= $self->result_source->schema->cobrand;
+    $cobrand->call_hook(munge_body_areas_practical => $self, \@area_ids);
+
+    return @area_ids;
+}
+
 sub area_children {
     my ( $self, $all_generations ) = @_;
 
-    my @body_area_ids = map { $_->area_id } $self->body_areas->all;
+    my @body_area_ids = $self->areas_practical;
     return unless @body_area_ids;
 
-    my $cobrand = $self->result_source->schema->cobrand;
+    my $cobrand = $self->get_cobrand_handler;
+    $cobrand ||= $self->result_source->schema->cobrand;
 
-    return $cobrand->fetch_area_children(\@body_area_ids, $all_generations);
+    return $cobrand->fetch_area_children(\@body_area_ids, $self, $all_generations);
 }
 
 =head2 get_cobrand_handler
@@ -208,7 +229,7 @@ e.g.
 
 sub get_cobrand_handler {
     my $self = shift;
-    my $moniker = $self->get_extra_metadata('cobrand');
+    my $moniker = $self->cobrand;
 
     # Need the exists() check because get_class_for_moniker falls back to
     # returning ::Default which isn't what we want here.
@@ -307,6 +328,23 @@ sub staff_with_permission {
         distinct => 1,
         order_by => { '-asc' => ['name'] },
     });
+}
+
+=head2 site_message
+
+Returns the relevant site message.
+
+=cut
+
+sub site_message {
+    my ($self, $type, $ooh) = @_;
+
+    my $suffix = '';
+    $suffix .= "_$type" if $type;
+    $suffix .= "_ooh" if $ooh;
+
+    my $msg = $self->get_extra_metadata("site_message$suffix") || $self->get_extra_metadata("emergency_message$suffix");
+    return $msg;
 }
 
 1;

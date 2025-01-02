@@ -4,6 +4,7 @@ use base 'DBIx::Class::ResultSet';
 use strict;
 use warnings;
 use POSIX qw(strcoll);
+use Scalar::Util qw(weaken);
 
 =head1 Name
 
@@ -55,7 +56,7 @@ sub translated {
     my $rs = shift;
     my $schema = $rs->result_source->schema;
     $rs->search(undef, {
-        '+columns' => { 'msgstr' => 'translations.msgstr' },
+        '+columns' => { 'msgstr' => \'COALESCE(translations.msgstr, me.name)' },
         join => 'translations',
         bind => [ 'name', $schema->lang, 'body' ],
     });
@@ -155,16 +156,18 @@ sub all_sorted {
         $body->{parent} = { id => $body->{parent}, name => $body->{parent_name} } if $body->{parent};
 
         # DEPRECATED: url(c, query_params) -> url
+        my $b = $body;
+        weaken($b);
         $body->{url} = sub {
             my ($c, $args) = @_;
-            return FixMyStreet::DB::Result::Body::_url($body, $cobrand, $args);
+            return FixMyStreet::DB::Result::Body::_url($b, $cobrand, $args);
         };
 
         # DEPRECATED: get_column('area_count') -> area_count
         next unless defined $body->{area_count};
         $body->{get_column} = sub {
             my $key = shift;
-            return $body->{$key};
+            return $b->{$key};
         };
     }
 

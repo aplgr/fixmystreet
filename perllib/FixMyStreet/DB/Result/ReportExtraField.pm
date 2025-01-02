@@ -10,6 +10,7 @@ use warnings;
 use base 'DBIx::Class::Core';
 __PACKAGE__->load_components(
   "FilterColumn",
+  "+FixMyStreet::DB::JSONBColumn",
   "FixMyStreet::InflateColumn::DateTime",
   "FixMyStreet::EncodedColumn",
 );
@@ -29,21 +30,18 @@ __PACKAGE__->add_columns(
   "language",
   { data_type => "text", is_nullable => 1 },
   "extra",
-  { data_type => "text", is_nullable => 1 },
+  { data_type => "jsonb", is_nullable => 1 },
 );
 __PACKAGE__->set_primary_key("id");
 
 
-# Created by DBIx::Class::Schema::Loader v0.07035 @ 2019-04-25 15:41:27
-# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:yRF676ybdkfalMwZ9V+yhw
-
-__PACKAGE__->load_components("+FixMyStreet::DB::RABXColumn");
-__PACKAGE__->rabx_column('extra');
+# Created by DBIx::Class::Schema::Loader v0.07035 @ 2024-10-21 23:30:33
+# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:IU8WZrwpQ2UxbIVaII3B5A
 
 use Moo;
 use namespace::clean -except => [ 'meta' ];
 
-with 'FixMyStreet::Roles::Extra';
+with 'FixMyStreet::Roles::DB::Extra';
 
 # You can replace this text with custom code or comments, and it will be preserved on regeneration
 1;

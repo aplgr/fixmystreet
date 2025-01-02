@@ -1,3 +1,4 @@
+use Catalyst::Test 'FixMyStreet::App';
 use FixMyStreet::TestMech;
 use FixMyStreet;
 use FixMyStreet::DB;
@@ -38,6 +39,7 @@ is_deeply $visible_states, {
     'unable to fix'               => 1,
     'not responsible'             => 1,
     'duplicate'                   => 1,
+    'cancelled'                   => 1,
     'closed'                      => 1,
     'internal referral'           => 1,
     }, 'visible_states is correct';
@@ -121,6 +123,7 @@ for my $test (
     };
 }
 
+my $normal_user = FixMyStreet::DB->resultset('User')->find_or_create({ email => 'user@example.net' });
 my $user = FixMyStreet::DB->resultset('User')->find_or_create(
     {
         email => 'system_user@example.net'
@@ -136,9 +139,15 @@ $problem->insert;
 my $tz_local = DateTime::TimeZone->new( name => 'local' );
 my $comment_time = DateTime->now->set_time_zone( $tz_local );
 
-my $body = FixMyStreet::DB->resultset('Body')->new({
+my $body = FixMyStreet::DB->resultset('Body')->create({
     name => 'Edinburgh City Council'
 });
+
+my $existing_user = FixMyStreet::DB->resultset('User')->create(
+    {   email => '123@example.com',
+        name  => 'User 123',
+    },
+);
 
 for my $test (
     {
@@ -169,6 +178,32 @@ for my $test (
         start_state => 'fixed - council',
         state => 'confirmed',
     },
+    {
+        desc    => 'assigned user who exists on FMS',
+        request => {
+            comment_time => $comment_time,
+            status       => 'open',
+            description  => 'Assigning a user',
+            extras       => {
+                assigned_user_name  => 'User 123',
+                assigned_user_email => '123@example.com',
+            },
+        },
+        state => 'confirmed',
+    },
+    {
+        desc    => 'assigned user who does not exist on FMS',
+        request => {
+            comment_time => $comment_time,
+            status       => 'open',
+            description  => 'Assigning a user',
+            extras       => {
+                assigned_user_name  => 'User 234',
+                assigned_user_email => '234@example.com',
+            },
+        },
+        state => 'confirmed',
+    },
 ) {
     subtest $test->{desc} => sub {
         # makes testing easier;
@@ -193,8 +228,82 @@ for my $test (
         ok $update, 'updated created';
         is $problem->state, $test->{state}, 'problem state';
         is $update->text, $test->{request}->{description}, 'update text';
+
+        if ( my $assigned = $test->{request}{extras} ) {
+            my $assigned_user = FixMyStreet::DB->resultset('User')
+                ->search( { email => $assigned->{assigned_user_email} } )
+                    ->first;
+
+            # Check certain fields set for new user
+            if ( $assigned->{assigned_user_email} ne $existing_user->email ) {
+                is $assigned_user->from_body->id, $body->id,
+                    'assigned user body';
+                is $assigned_user->email_verified, 1,
+                    'assigned user email verified';
+                is_deeply $assigned_user->body_permissions,
+                    [ { body_id => $body->id, permission => 'report_inspect' }
+                    ],
+                    'assigned user permissions';
+            }
+
+            is $assigned_user->name, $assigned->{assigned_user_name},
+                'assigned user name';
+
+            is $problem->shortlisted_user->email,
+                $assigned->{assigned_user_email},
+                'assigned user actually assigned to problem';
+        }
     };
 }
+
+subtest 'Test receiving latest data only' => sub {
+    $problem->comments->delete;
+    $problem->add_to_comments({
+        user => $user,
+        external_id => 'timestampA',
+        send_state => 'processed',
+        text => 'An update',
+        confirmed => $comment_time,
+        created => $comment_time,
+    });
+    $problem->add_to_comments({
+        user => $user,
+        external_id => 'timestampB',
+        send_state => 'processed',
+        problem_state => 'in progress',
+        text => 'Latest data update',
+        confirmed => $comment_time,
+        created => $comment_time,
+    });
+    $problem->add_to_comments({
+        user => $normal_user,
+        external_id => 'timestampC',
+        send_state => 'sent',
+        problem_state => 'in progress',
+        text => 'Some text from a user',
+        confirmed => $comment_time,
+        created => $comment_time,
+    });
+
+    my $request = {
+        comment_time => $comment_time,
+        status       => 'IN_PROGRESS',
+        description  => 'Latest data update',
+        extras       => {
+            latest_data_only => 1,
+        },
+    };
+
+    my $o = Open311->new( jurisdiction => 'mysociety', endpoint => 'http://example.com' );
+    my $updates = Open311::GetUpdates->new(
+        current_open311 => $o,
+        current_body => $body,
+        system_user => $user,
+    );
+
+    my $update = $updates->process_update($request, $problem);
+    is $update, undef;
+};
 
 for my $test (
     {
@@ -344,7 +453,7 @@ for my $body (
     { area_id => 14279, name => 'TransportNI (Western)' },
 ) {
     my $aid = $body->{area_id};
-    my $body = $mech->create_body_ok($aid, $body->{name}, {}, { cobrand => $body->{cobrand} });
+    my $body = $mech->create_body_ok($aid, $body->{name}, { cobrand => $body->{cobrand} });
     if ($body_ids{$aid}) {
         $body_ids{$aid} = [ $body_ids{$aid}, $body->id ];
     } else {
@@ -494,9 +603,9 @@ foreach my $test ( {
 
         $problem_rs->search(
             {
-                whensent => undef
+                send_state => 'unprocessed'
             }
-        )->update( { whensent => \'current_timestamp' } );
+        )->update( { send_state => 'sent' } );
 
         $problem->discard_changes;
         $problem->update( {
@@ -505,6 +614,7 @@ foreach my $test ( {
             state => 'confirmed',
             confirmed => \'current_timestamp',
             whensent => $test->{ unset_whendef } ? undef : \'current_timestamp',
+            send_state => $test->{unset_whendef} ? 'unprocessed' : 'sent',
             category => $test->{ category } || 'potholes',
             name => $test->{ name },
             cobrand => $test->{ cobrand } || 'fixmystreet',
@@ -574,9 +684,9 @@ subtest 'check can set multiple emails as a single contact' => sub {
 
     $problem_rs->search(
         {
-            whensent => undef
+            send_state => 'unprocessed'
         }
-    )->update( { whensent => \'current_timestamp' } );
+    )->update( { send_state => 'sent' } );
 
     $problem->discard_changes;
     $problem->update( {
@@ -584,6 +694,7 @@ subtest 'check can set multiple emails as a single contact' => sub {
         state => 'confirmed',
         confirmed => \'current_timestamp',
         whensent => undef,
+        send_state => 'unprocessed',
         category => 'trees',
         name => 'Test User',
         cobrand => 'fixmystreet',
@@ -611,9 +722,9 @@ subtest 'check can turn on report sent email alerts' => sub {
 
     $problem_rs->search(
         {
-            whensent => undef
+            send_state => 'unprocessed'
         }
-    )->update( { whensent => \'current_timestamp' } );
+    )->update( { send_state => 'sent' } );
 
     $problem->discard_changes;
     $problem->update( {
@@ -621,6 +732,7 @@ subtest 'check can turn on report sent email alerts' => sub {
         state => 'confirmed',
         confirmed => \'current_timestamp',
         whensent => undef,
+        send_state => 'unprocessed',
         category => 'potholes',
         name => 'Test User',
         cobrand => 'fixmystreet',
@@ -659,9 +771,9 @@ subtest 'check iOS app store test reports not sent' => sub {
 
     $problem_rs->search(
         {
-            whensent => undef
+            send_state => 'unprocessed'
         }
-    )->update( { whensent => \'current_timestamp' } );
+    )->update( { send_state => 'sent' } );
 
     $problem->discard_changes;
     $problem->update( {
@@ -670,6 +782,7 @@ subtest 'check iOS app store test reports not sent' => sub {
         state => 'confirmed',
         confirmed => \'current_timestamp',
         whensent => undef,
+        send_state => 'unprocessed',
         category => 'potholes',
         send_fail_count => 0,
     } );
@@ -688,9 +801,9 @@ subtest 'check reports from abuser not sent' => sub {
 
     $problem_rs->search(
         {
-            whensent => undef
+            send_state => 'unprocessed'
         }
-    )->update( { whensent => \'current_timestamp' } );
+    )->update( { send_state => 'sent' } );
 
     $problem->discard_changes;
     $problem->update( {
@@ -699,6 +812,7 @@ subtest 'check reports from abuser not sent' => sub {
         state => 'confirmed',
         confirmed => \'current_timestamp',
         whensent => undef,
+        send_state => 'unprocessed',
         category => 'potholes',
         send_fail_count => 0,
     } );
@@ -714,6 +828,7 @@ subtest 'check reports from abuser not sent' => sub {
         state => 'confirmed',
         confirmed => \'current_timestamp',
         whensent => undef,
+        send_state => 'unprocessed',
     } );
 
     my $abuse = FixMyStreet::DB->resultset('Abuse')->create( { email => $problem->user->email } );
@@ -850,6 +965,347 @@ subtest 'return how many days ago a problem was reported' => sub {
     } );
 
     is $problem->days_ago('lastupdate'), 4, 'days_ago allows other dates to be specified';
+};
+
+subtest 'around_map' => sub {
+    # Delete all previous reports
+    my @reports = $problem_rs->all;
+    for my $r (@reports) {
+        $r->comments->delete;
+        $r->questionnaires->delete;
+        $r->delete;
+    }
+
+    my $around_map_body = FixMyStreet::DB->resultset('Body')
+        ->create( { name => 'Around Map Council' } );
+
+    # Set some problems
+    my @problem_params = (
+        {   title       => 'open_less_month',
+            state       => 'confirmed',
+            external_id => 'open_less_month',
+            dt          => $comment_time->clone->subtract( days => 14 ),
+        },
+        {
+            title       => 'open_more_month',
+            state       => 'confirmed',
+            external_id => 'open_more_month',
+            dt          => $comment_time->clone->subtract( months => 2 ),
+        },
+
+        {   title => 'closed_less_week',
+            state => 'not responsible',
+            dt    => $comment_time->clone->subtract( days => 6 ),
+        },
+        {   title => 'closed_more_week',
+            state => 'not responsible',
+            dt    => $comment_time->clone->subtract( weeks => 2 ),
+        },
+
+        {   title => 'fixed_less_day',
+            state => 'fixed - council',
+            dt    => $comment_time->clone->subtract( hours => 23 ),
+        },
+        {   title => 'fixed_more_day',
+            state => 'fixed - council',
+            dt    => $comment_time->clone->subtract( days => 2 ),
+        },
+
+        {   title      => 'open_less_month_non_public',
+            state      => 'confirmed',
+            non_public => 1,
+            dt         => $comment_time->clone->subtract( days => 14 ),
+        },
+        {   title      => 'open_more_month_non_public',
+            state      => 'confirmed',
+            non_public => 1,
+            dt         => $comment_time->clone->subtract( months => 2 ),
+        },
+    );
+    for (@problem_params) {
+        $mech->create_problems_for_body( 1, $around_map_body->id,
+            $_->{title}, $_ );
+    }
+
+    # Defaults
+    my %search_params = (
+        # These cover the default lat & lon in
+        # TestMech->create_problems_for_body()
+        min_lat => 51,
+        max_lat => 52,
+        min_lon => -1,
+        max_lon => 0,
+    );
+    my $c = ctx_request('/');
+    $c->stash->{report_age_field} = 'confirmed';
+
+    subtest 'scalar report_age' => sub {
+        my $got = $problem_rs->around_map(
+            $c,
+            %search_params,
+            report_age => '1 weeks',
+        );
+
+        my @got_titles = sort map { $_->title } $got->all;
+        my @expected_titles = sort qw/
+            closed_less_week
+            fixed_less_day
+            fixed_more_day
+            /;
+        is_deeply \@got_titles, \@expected_titles;
+    };
+
+    subtest 'explicit report_ages for open, closed, and fixed' => sub {
+        my $got = $problem_rs->around_map(
+            $c,
+            %search_params,
+            report_age => {
+                open   => '1 months',
+                closed => '1 weeks',
+                fixed  => '1 days',
+            },
+        );
+
+        my @got_titles = sort map { $_->title } $got->all;
+        my @expected_titles = sort qw/
+            open_less_month
+            closed_less_week
+            fixed_less_day
+            /;
+        is_deeply \@got_titles, \@expected_titles;
+    };
+
+    subtest 'explicit report_age for open only' => sub {
+        my $got = $problem_rs->around_map(
+            $c,
+            %search_params,
+            report_age => {
+                open   => '1 months',
+            },
+        );
+
+        # NB Default report_age is 6 months
+        my @got_titles = sort map { $_->title } $got->all;
+        my @expected_titles = sort qw/
+            open_less_month
+            closed_less_week
+            closed_more_week
+            fixed_less_day
+            fixed_more_day
+            /;
+        is_deeply \@got_titles, \@expected_titles;
+    };
+
+    subtest 'states param passed in' => sub {
+        subtest 'with scalar report_age' => sub {
+            my $got = $problem_rs->around_map(
+                $c,
+                %search_params,
+                report_age => '1 weeks',
+                states     => { 'not responsible' => 1 },
+            );
+
+            my @got_titles = sort map { $_->title } $got->all;
+            my @expected_titles = sort qw/
+                closed_less_week
+                /;
+            is_deeply \@got_titles, \@expected_titles;
+        };
+
+        subtest 'with hashref report_age' => sub {
+            my $got = $problem_rs->around_map(
+                $c,
+                %search_params,
+                report_age => { open              => '1 months', },
+                states     => { 'not responsible' => 1 },
+            );
+
+            my @got_titles = sort map { $_->title } $got->all;
+            my @expected_titles = sort qw/
+                closed_less_week
+                closed_more_week
+                /;
+            is_deeply \@got_titles, \@expected_titles;
+        };
+    };
+
+    subtest 'hashref report_age interacting with non_public_if_possible' => sub {
+        # Set a report_inspect user on $c
+        my $report_inspect_user = $mech->log_in_ok( 'report_inspect@example.com' );
+        $report_inspect_user->update({ from_body => $around_map_body });
+        $report_inspect_user->user_body_permissions->find_or_create({
+            body => $around_map_body,
+            permission_type => 'report_inspect',
+        });
+        $c->user($report_inspect_user);
+
+
+        subtest 'only_non_public = 1' => sub {
+            $c->stash->{only_non_public} = 1;
+
+            subtest 'without report_age' => sub {
+                my $got = $problem_rs->around_map(
+                    $c,
+                    %search_params,
+                );
+
+                my @got_titles = sort map { $_->title } $got->all;
+                my @expected_titles = sort qw/
+                    open_less_month_non_public
+                    open_more_month_non_public
+                    /;
+                is_deeply \@got_titles, \@expected_titles;
+            };
+
+            subtest 'with report_age' => sub {
+                my $got = $problem_rs->around_map(
+                    $c,
+                    %search_params,
+                    report_age => {
+                        open => '1 months',
+                    },
+                );
+
+                my @got_titles = sort map { $_->title } $got->all;
+                my @expected_titles = sort qw/
+                    open_less_month_non_public
+                    /;
+                is_deeply \@got_titles, \@expected_titles;
+            };
+        };
+
+        subtest 'only_non_public = 0' => sub {
+            $c->stash->{only_non_public} = 0;
+
+            subtest 'without report_age' => sub {
+                my $got = $problem_rs->around_map(
+                    $c,
+                    %search_params,
+                );
+
+                my @got_titles = sort map { $_->title } $got->all;
+                my @expected_titles = sort qw/
+                    open_less_month_non_public
+                    open_more_month_non_public
+                    open_less_month
+                    open_more_month
+                    closed_less_week
+                    closed_more_week
+                    fixed_less_day
+                    fixed_more_day
+                    /;
+                is_deeply \@got_titles, \@expected_titles;
+            };
+
+            subtest 'with report_age' => sub {
+                my $got = $problem_rs->around_map(
+                    $c,
+                    %search_params,
+                    report_age => {
+                        open => '1 months',
+                    },
+                );
+
+                my @got_titles = sort map { $_->title } $got->all;
+                my @expected_titles = sort qw/
+                    open_less_month_non_public
+                    open_less_month
+                    closed_less_week
+                    closed_more_week
+                    fixed_less_day
+                    fixed_more_day
+                    /;
+                is_deeply \@got_titles, \@expected_titles;
+            };
+        };
+    };
+
+    subtest 'report_age for (Confirm) jobs' => sub {
+        # Remove user so we're not hitting only_non_public logic
+        $c->user(undef);
+
+        # Add some JOB_* problems
+        @problem_params = (
+            {   title       => 'open_less_6_month_job',
+                state       => 'confirmed',
+                external_id => 'JOB_open_less_6_month_job',
+                dt          => $comment_time->clone->subtract( months => 4 ),
+            },
+            {
+                title       => 'open_more_6_month_job',
+                state       => 'confirmed',
+                external_id => 'JOB_open_more_6_month_job',
+                dt          => $comment_time->clone->subtract( months => 7 ),
+            },
+
+            {   title => 'fixed_less_hour_job',
+                state => 'fixed - council',
+                external_id => 'JOB_fixed_less_hour_job',
+                dt    => $comment_time->clone->subtract( minutes => 50 ),
+            },
+            {   title => 'fixed_more_hour_job',
+                state => 'fixed - council',
+                external_id => 'JOB_fixed_more_hour_job',
+                dt    => $comment_time->clone->subtract( minutes => 70 ),
+            },
+        );
+        for (@problem_params) {
+            $mech->create_problems_for_body( 1, $around_map_body->id,
+                $_->{title}, $_ );
+        }
+
+
+        subtest 'Simple hashref report_age' => sub {
+            my $got = $problem_rs->around_map(
+                $c,
+                %search_params,
+                report_age => {
+                    open  => '5 months',
+                    fixed => '1 hours',
+                },
+            );
+
+            my @got_titles = sort map { $_->title } $got->all;
+
+            my @expected_titles = sort qw/
+                open_less_6_month_job
+                open_more_month
+                open_less_month
+                fixed_less_hour_job
+                closed_less_week
+                closed_more_week
+                /;
+            is_deeply \@got_titles, \@expected_titles;
+        };
+
+        subtest 'Nested hashref report_age' => sub {
+            my $got = $problem_rs->around_map(
+                $c,
+                %search_params,
+                report_age => {
+                    open => {
+                        job     => '5 months',
+                        enquiry => '1 months',
+                    },
+                    fixed => {
+                        job => '1 hours',
+                    },
+                },
+            );
+
+            my @got_titles = sort map { $_->title } $got->all;
+            my @expected_titles = sort qw/
+                open_less_6_month_job
+                open_less_month
+                fixed_less_hour_job
+                fixed_less_day
+                fixed_more_day
+                closed_less_week
+                closed_more_week
+                /;
+            is_deeply \@got_titles, \@expected_titles;
+        };
+    };
 };
 
 END {

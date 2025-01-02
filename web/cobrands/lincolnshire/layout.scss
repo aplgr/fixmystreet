@@ -9,14 +9,6 @@
     color: $primary_text;
 }
 
-#front-main {
-    background-color: $front_main_background;
-    text-align: left;
-    #postcodeForm div {
-        margin: 0;
-    }
-}
-
 #main-nav {
     float: none;
     // Put the main FMS navigation below the site header
@@ -28,8 +20,17 @@
       }
 }
 
-  
-body.frontpage, body.twothirdswidthpage, body.fullwidthpage, body.authpage {
+#front-main #front-main-container {
+    padding: 2em 0;
+}
+
+body:not(.mappage) {
+
+    #site-logo {
+        height: 100px;
+        width: 249px;
+        background-size: 249px 82px;
+    }
 
     // White "nav bar" with red border-top, below the logo
     #site-header {
@@ -63,17 +64,12 @@ body.frontpage, body.twothirdswidthpage, body.fullwidthpage, body.authpage {
     .nav-menu--main a.report-a-problem-btn {
         background-color: transparent;
     }
-
-    // Put FAQ side nav at correct vertical position
-    .content .sticky-sidebar aside {
-        top: 12.5em;
-    }
 }
 
 body.mappage {
     // Add a red border-bottom *inside* the header
     #site-header {
-        @include box-sizing(border-box);
+        box-sizing: border-box;
         border-bottom: solid 5px $primary;
     }
 

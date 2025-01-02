@@ -5,7 +5,6 @@ use namespace::autoclean;
 use JSON::MaybeXS;
 use List::MoreUtils qw(any);
 use Path::Tiny;
-use RABX;
 use FixMyStreet::MapIt;
 
 BEGIN { extends 'Catalyst::Controller'; }
@@ -230,7 +229,7 @@ sub setup_map :Private {
 
     my $pins = $c->stash->{pins} || [];
 
-    my $areas = [ $c->stash->{wards} ? map { $_->{id} } @{$c->stash->{wards}} : keys %{$c->stash->{body}->areas} ];
+    my $areas = [ $c->stash->{wards} ? map { $_->{id} } @{$c->stash->{wards}} : $c->stash->{body}->areas_practical ];
     $c->cobrand->call_hook(munge_reports_area_list => $areas);
     my %map_params = (
         latitude  => @$pins ? $pins->[0]{latitude} : 0,
@@ -255,10 +254,20 @@ sub rss_area_ward : Path('/rss/area') : Args(2) {
 
     $c->stash->{rss} = 1;
 
-    # area_check
-
     $area =~ s/\+/ /g;
     $area =~ s/\.html//;
+
+    if ($area =~ /^[0-9]+$/) {
+        my $area = FixMyStreet::MapIt::call( 'area', $area );
+        $c->detach( 'redirect_index' ) unless $area;
+
+        $c->stash->{qs} = "";
+        $c->stash->{type} = 'area_problems';
+        $c->stash->{title_params} = { NAME => $area->{name} };
+        $c->stash->{db_params} = [ $area->{id} ];
+
+        $c->detach( '/rss/output' );
+    }
 
     # XXX Currently body/area overlaps here are a bit muddy.
     # We're checking an area here, but this function is currently doing that.
@@ -286,15 +295,6 @@ sub rss_area_ward : Path('/rss/area') : Args(2) {
     my $url = $c->cobrand->short_name( $c->stash->{area} );
     $url .= '/' . $c->cobrand->short_name( $c->stash->{ward} ) if $c->stash->{ward};
     $c->stash->{qs} = "/$url";
-
-    if ($c->cobrand->moniker eq 'fixmystreet' && $c->stash->{area}{type} ne 'DIS' && $c->stash->{area}{type} ne 'CTY') {
-        # UK-specific types - two possibilites are the same for one-tier councils, so redirect one to the other
-        # With bodies, this should presumably redirect if only one body covers
-        # the area, and then it will need that body's name (rather than
-        # assuming as now it is the same as the area)
-        $c->stash->{body} = $c->stash->{area};
-        $c->detach( 'redirect_body' );
-    }
 
     $c->stash->{type} = 'area_problems';
     if ( $c->stash->{ward} ) {
@@ -430,16 +430,16 @@ sub ward_check : Private {
         s{_}{/}g;
     }
     # Could be from RSS area, or body...
-    my $parent_id;
+
+    my $qw;
     if ( $c->stash->{body} ) {
-        $parent_id = $c->stash->{body}->body_areas->first;
-        $c->detach( 'redirect_body' ) unless $parent_id;
-        $parent_id = $parent_id->area_id;
+        $qw = $c->stash->{body}->area_children;
+        $c->detach( 'redirect_body' ) unless $qw;
     } else {
-        $parent_id = $c->stash->{area}->{id};
+        my $parent_id = $c->stash->{area}->{id};
+        $qw = $c->cobrand->fetch_area_children($parent_id);
     }
 
-    my $qw = $c->cobrand->fetch_area_children($parent_id);
     $c->cobrand->call_hook('add_parish_wards' => $qw);
 
     $qw = [values %$qw];
@@ -478,15 +478,6 @@ sub summary : Private {
 
     $c->log->info($c->user->email . ' viewed ' . $c->req->uri->path_query) if $c->user_exists;
 
-    eval {
-        my $data = path(FixMyStreet->path_to('../data/all-reports-dashboard.json'))->slurp_utf8;
-        $data = decode_json($data);
-        $c->stash(
-            top_five_bodies => $data->{top_five_bodies},
-            average => $data->{average},
-        );
-    };
-
     my $dtf = $c->model('DB')->storage->datetime_parser;
     my $period = $c->stash->{period} = $c->get_param('period') || '';
     my $start_date;
@@ -524,7 +515,6 @@ sub summary : Private {
     }
 
     $c->forward('/dashboard/generate_grouped_data');
-    $c->forward('/dashboard/generate_body_response_time');
 
     $c->stash->{template} = 'reports/summary.html';
 }
@@ -797,7 +787,8 @@ sub stash_report_filter_status : Private {
 
     my $body_user = $c->user_exists && $c->stash->{body} && $c->user->belongs_to_body($c->stash->{body}->id);
     my $staff_user = $c->user_exists && ($c->user->is_superuser || $body_user);
-    if ($staff_user || $c->cobrand->call_hook('filter_show_all_states')) {
+    my $planned_page = $c->action eq 'my/planned';
+    if ($staff_user || $planned_page || $c->cobrand->call_hook('filter_show_all_states')) {
         $c->stash->{filter_states} = $c->cobrand->state_groups_inspect;
         foreach my $state (keys %$visible) {
             if ($status{$state}) {

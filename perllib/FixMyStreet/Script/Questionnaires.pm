@@ -37,9 +37,7 @@ sub send_questionnaires_period {
         \"(select max(whenanswered) from questionnaire where me.id=problem_id) < current_timestamp - '$period'::interval",
     ];
 
-    my $unsent = FixMyStreet::DB->resultset('Problem')->search( $q_params, {
-        order_by => { -desc => 'confirmed' }
-    } );
+    my $unsent = FixMyStreet::DB->resultset('Problem')->search( $q_params)->order_by('-confirmed');
 
     while (my $row = $unsent->next) {
 
@@ -57,9 +55,12 @@ sub send_questionnaires_period {
         # Cobrands can also override sending per row if they wish
         my $cobrand_send = $cobrand->call_hook('send_questionnaire', $row) // 1;
 
-        if ($row->is_from_abuser || !$row->user->email_verified ||
-            !$cobrand_send || $row->is_closed
-           ) {
+        if (   $row->is_from_abuser
+            || !$row->user->email_verified
+            || !$row->user->questionnaire_notify
+            || !$cobrand_send
+            || $row->is_closed )
+        {
             $row->update( { send_questionnaire => 0 } );
             next;
         }

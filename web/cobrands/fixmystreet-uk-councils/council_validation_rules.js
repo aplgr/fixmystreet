@@ -21,6 +21,12 @@ body_validation_rules = {
         }
     },
     'Buckinghamshire Council': confirm_validation_rules,
+    'Central Bedfordshire Council': {
+        phone: {
+            validUkPhone: true,
+            maxlength: 20
+        }
+    },
     'Cheshire East Council': confirm_validation_rules,
     'Hackney Council': {
         detail: {
@@ -100,5 +106,16 @@ body_validation_rules = {
             maxlength: 20
         }
     },
-    'Southwark Council': confirm_validation_rules
+    'Southwark Council': confirm_validation_rules,
+    'Surrey County Council': {
+      title: {
+          required: true,
+          notEmail: true
+      },
+      detail: {
+          maxlength: 1000,
+          required: true,
+          notEmail: true
+      }
+  }
 };

@@ -12,8 +12,25 @@ $link-visited-color: $link-color !default;
 $link-text-decoration: none !default;
 $link-hover-text-decoration: underline !default;
 
+$error_color: #D50404 !default;
+
 $primary_link_decoration: underline !default;
 $primary_link_hover_decoration: $primary_link_decoration !default;
+
+$button-primary-bg-top: #222 !default;
+$button-primary-bg-bottom: $button-primary-bg-top !default;
+$button-primary-border: darken($button-primary-bg-top, 50%) !default;
+$button-primary-text: #fff !default;
+
+$button-primary-hover-bg-top: mix($button-primary-bg-top, #fff, 80%) !default;
+$button-primary-hover-bg-bottom: mix($button-primary-bg-bottom, #fff, 80%) !default;
+$button-primary-hover-border: darken($button-primary-border, 100%) !default;
+$button-primary-hover-text: #fff !default;
+
+$button-primary-focus-bg-top: #ffe100 !default;
+$button-primary-focus-bg-bottom: #ffe100 !default;
+$button-primary-focus-border: $button-primary-border !default;
+$button-primary-focus-text: #222 !default;
 
 $pagination_background: #f6f6f6 !default;
 $itemlist_item_background: #f6f6f6 !default;
@@ -28,8 +45,25 @@ $header-top-border: $header-top-border-width solid $primary !default;
 
 $container-max-width: 60em !default;
 
+// None of the form variables control the desktop styling. For that refer to _layout.scss
+// $front-main-color controls the colours of all elements inside #front-main and .postcode-form-box element.
+$front-main-color: $primary_text !default;
+// $front-main-background controls the background of the #front-main element. This is a full width element.
+$front-main-background: none !default;
+// $postcodeform-background controls the background of the postcode-form-box. It excludes the h1 and h2 elements.
+$postcodeform-background: $primary !default;
+$postcodeform-color: $primary_text !default;
+$front-main-h2-color: transparentize($front-main-color, 0.1) !default;
+$form-hint-color: transparentize($postcodeform-color, 0.2) !default;
+
 $geolocation-link: #222 !default;
 $geolocation-link-border: $geolocation-link !default;
+$geolocation-link-background-color: transparent !default;
+
+$footer-main-nav-font-size: 1rem !default;
+$footer-main-nav-padding: 2em 0 !default;
+$footer-main-nav-background: #2E3033 !default;
+$footer-main-nav-color: #fff !default;
 
 @import "_mixins";
 @import "_report_list";
@@ -122,6 +156,11 @@ ol li {
   list-style: decimal;
 }
 
+.bulky-intro-pricing {
+  list-style: none;
+  margin-bottom: 0em;
+}
+
 // lets you have a traditional ol but with nicely styled numbers
 // for older browsers it just falls back to the normal ol
 ol.big-numbers {
@@ -151,15 +190,26 @@ ol.big-numbers {
 dl {
   margin: 0;
   padding: 0;
+}
+dt {
+  font-size: 1em;
+  line-height: 1.5em;
+  font-weight: bold;
+}
+dd {
+  font-size: 1em;
+  line-height: 1.5em;
+  margin: 0 0 1em;
+}
+
+.sticky-sidebar--help + .content {
   dt {
-    font-size: 1em;
-    line-height: 1.5em;
-    font-weight: bold;
+    font-size: 1.125em;
+    margin-bottom: 0.5em;
   }
+
   dd {
-    font-weight: 1em;
-    line-height: 1.5em;
-    margin: 0 0 1em;
+    margin: 0 0 1.2em;
   }
 }
 
@@ -191,6 +241,7 @@ select,
 input,
 textarea {
   font-size: 99%;
+  font-family: $meta-font;
 }
 
 // To deal with bug from drop-down being wider than holder
@@ -287,7 +338,7 @@ input[type="time"],
 input[type="datetime"],
 input[type="url"],
 textarea {
-  @include box-sizing(border-box);
+  box-sizing: border-box;
   display: block;
   width: 100%;
   padding: 0.5em;
@@ -324,7 +375,7 @@ legend,
   display: block;
   background-color: #fff;
   border: 1px solid $form-control-border-color;
-  @include border-radius(4px);
+  border-radius: 4px;
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
   font-family: inherit; // eg: stop Firefox and IE10-11 using Courier in textareas
   margin-bottom: 0.5em;
@@ -421,7 +472,7 @@ select.form-control {
     width: 16px;
     height: 18px;
     background-repeat: no-repeat;
-    @include svg-background-image("/cobrands/fixmystreet/images/padlock");
+    background-image: url("/cobrands/fixmystreet/images/padlock.svg");
     background-size: 16px 18px;
     margin-#{$right}: 0.5em;
   }
@@ -541,11 +592,11 @@ small.or:after {
 }
 
 .change_location__map {
-  @include svg-background-image("/cobrands/fixmystreet/images/change-location-arrow");
+  background-image: url("/cobrands/fixmystreet/images/change-location-arrow.svg");
 }
 
 .change_location__search {
-  @include svg-background-image("/cobrands/fixmystreet/images/change-location-search");
+  background-image: url("/cobrands/fixmystreet/images/change-location-search.svg");
 }
 
 // Space between the .change_location list and any
@@ -556,8 +607,8 @@ small.or:after {
 
 .form-txt-submit-box {
   @include clearfix();
-  @include flex-container();
-  @include flex-wrap(wrap);
+  display: flex;
+  flex-wrap: wrap;
   input[type="password"],
   input[type="tel"],
   input[type="number"],
@@ -566,13 +617,17 @@ small.or:after {
   select {
     width: auto;
     max-width: none;
-    @include flex(72 0 auto);
+    flex: 72 0 auto;
   }
   input[type="submit"] {
-    @include flex(28 0 auto);
+    flex: 28 0 auto;
     margin: 0 0.25em 0.5em;
     padding-top: 0.6em;
     padding-bottom: 0.5em;
+  }
+
+  &:has(.form-error) {
+    flex-direction: column;
   }
 }
 
@@ -595,11 +650,13 @@ small.or:after {
 // form errors
 div.form-error,
 p.form-error {
-  @include inline-block;
-  background: #ff0000;
+  display: inline-block;
+  vertical-align: middle;
+  background: $error_color;
   color: #fff;
   padding: 0 0.5em;
-  @include border-radius(0.25em 0.25em 0 0);
+  margin-bottom: 0;
+  border-radius: 0.25em 0.25em 0 0;
   a {
     color: white;
     text-decoration: underline;
@@ -611,28 +668,28 @@ p.form-error {
 
 input.form-error,
 textarea.form-error {
-  border-color: #ff0000;
-  @include border-radius(0 0.25em 0.25em 0.25em);
+  border-color: $error_color;
+  border-radius: 0 0.25em 0.25em 0.25em;
 }
 
 .form-error__box {
-  border: solid 2px #ff0000;
+  border: solid 2px $error_color;
   padding: 0.5em;
   margin-bottom: 0.5em;
 }
 
 ul.error {
-  background: #ff0000;
+  background: $error_color;
   color: #fff;
   padding: 0 0.5em;
-  @include border-radius(0.25em);
+  border-radius: 0.25em;
 }
 
 .form-success {
   background: #009900;
   color: #fff;
   padding: 0 0.5em;
-  @include border-radius(0.25em);
+  border-radius: 0.25em;
 }
 
 .duplicate-report-suggestions {
@@ -668,6 +725,32 @@ ul.error {
   visibility: visible;
 }
 
+.category-filter-box {
+    display: flex;
+    gap: 0.5em;
+    align-items: center;
+    margin: 1em 0;
+    label {
+        margin: 0;
+    }
+}
+
+.js-filter-subcategory {
+    clear: left;
+    margin-left: 2em;
+}
+
+.js-filter-subcategory legend {
+    display: none;
+}
+
+.govuk-radios--small .govuk-radios__item.js-filter-disabled {
+    padding-left: 0;
+}
+.js-filter-disabled label:before, .js-filter-disabled label:after {
+    display: none;
+}
+
 .no-js .js-back {
   display: none;
 }
@@ -675,18 +758,22 @@ ul.error {
 /*** LAYOUT ***/
 
 .skiplink {
+  @extend .btn;
   display: inline-block;
   padding: 1em;
   position: absolute;
   left: -9999em;
 }
+
 .skiplink:focus {
-  outline: 3px solid transparent;
+  outline: none; // Using box-shadow instead. This will allows us to have a dual-color outline, that will cover scenarios where the navbar bg colour and the outline have a similar brightness.
   color: $primary_text;
   background-color: $primary;
   text-decoration: none;
-  left: 0;
-  z-index: 2;
+  left: 0.4375rem; // Box-shadow will be completely visible
+  top: 0.4375rem; // Box-shadow will be completely visible
+  z-index: 999; //Higher value than the map
+  box-shadow:  0 0 0 0.125rem $button-primary-focus-bg-top, 0 0 0 0.3125rem $button-primary-focus-text, 0 0 0 0.4375rem; // If .button-primary in focus state is accessible. Then using these two colours will make sure at least one of the outline colours will have a good contrast with the navigation bar.
 }
 
 .dev-site-notice {
@@ -731,7 +818,7 @@ ul.error {
   background-position: 0 50%;
   background-repeat: no-repeat;
   background-size: 175px 35px;
-  @include svg-background-image("/cobrands/fixmystreet/images/site-logo");
+  background-image: url("/cobrands/fixmystreet/images/site-logo.svg");
   text-indent: -999999px;
 }
 
@@ -840,14 +927,6 @@ html.mobile.js-nav-open #js-menu-open-modal {
   span {
     background-color: mix(#fff, $primary, 70%);
   }
-  span.report-a-problem-btn {
-    cursor: pointer;
-  }
-  span.report-a-problem-btn:hover {
-    background-color: #333;
-    color: #fff;
-    text-decoration: none;
-  }
 }
 
 .shadow-wrap {
@@ -912,7 +991,7 @@ html.mobile.js-nav-open #js-menu-open-modal {
       vertical-align: -0.25em;
       background-size: 112px 16px;
       background-repeat: no-repeat;
-      @include svg-background-image("/cobrands/fixmystreet/images/report-tools");
+      background-image: url("/cobrands/fixmystreet/images/report-tools.svg");
     }
 
     &.abuse:after {
@@ -929,6 +1008,12 @@ html.mobile.js-nav-open #js-menu-open-modal {
 
     &.chevron:after {
       background-position: flip(-16px 0, 0 0);
+    }
+
+    &.offline:after {
+      background-size: 16px 16px;
+      background-position: 0 0;
+      background-image: url("/cobrands/fixmystreet/images/cloud-download.svg");
     }
   }
 
@@ -1006,19 +1091,38 @@ footer {
   }
 }
 
+.footer-main-nav {
+  padding: $footer-main-nav-padding;
+  background-color: $footer-main-nav-background;
+  .nav-footer {
+    display: flex;
+    column-gap: 2rem;
+    row-gap: 1rem;
+    font-size: $footer-main-nav-font-size;
+    justify-content: center;
+    margin: 0;
+    flex-wrap: wrap;
+  
+    li {
+        list-style: none;
+        margin-bottom: 0;
+    }
+
+    a {
+        color: $footer-main-nav-color;
+  
+        &:focus {
+            background-color: #ffff00;
+            color: #000;
+        }
+    }
+  }
+}
+
 /*BUTTONS*/
 
 .btn {
   @include button-reset();
-}
-
-// Deprecated
-// Try to use `btn btn--primary` etc instead of `btn-primary` where possible.
-.btn-primary,
-.green-btn,
-.btn-danger,
-.red-btn {
-  @include button-size();
 }
 
 .btn + .btn {
@@ -1026,14 +1130,10 @@ footer {
   margin-#{$left}: 0.5em;
 }
 
-.btn-primary,
-.green-btn,
 .btn--primary {
-  @include button-variant(#9fde23, #7fb900, #5b9700, #fff, #9fde23, #7fb900, #5b9700, #fff);
+  @include button-variant($button-primary-bg-top, $button-primary-bg-bottom, $button-primary-border, $button-primary-text, $button-primary-hover-bg-top, $button-primary-hover-bg-bottom, $button-primary-hover-border, $button-primary-hover-text,$button-primary-focus-bg-bottom,$button-primary-focus-bg-top, $button-primary-focus-border, $button-primary-focus-text);
 }
 
-.btn-danger,
-.red-btn,
 .btn--danger {
   @include button-variant(#ff0038, #bf002a, #80001c, #fff, #ff0038, #bf002a, #80001c, #fff);
 }
@@ -1098,7 +1198,7 @@ input.final-submit {
     height: 16px;
     background-repeat: no-repeat;
     background-size: 112px 16px;
-    @include svg-background-image("/cobrands/fixmystreet/images/button-icons");
+    background-image: url("/cobrands/fixmystreet/images/button-icons.svg");
     margin-#{$right}: 0.5em;
     vertical-align: -0.1em; // vertically centre icon in button
   }
@@ -1158,7 +1258,7 @@ input.final-submit {
   width: 100%;
   margin-left: 0;
   margin-right: 0;
-  @include box-sizing(border-box);
+  box-sizing: border-box;
 }
 
 // Don't want space between block-level buttons,
@@ -1218,8 +1318,7 @@ input.final-submit {
   margin-bottom: 0.5em;
 }
 
-%item-list__item--link {
-  padding: 0;
+%item-list--links {
   a {
     color: #222222;
     display: block;
@@ -1233,21 +1332,32 @@ input.final-submit {
   }
 }
 
-.item-list--wards__item {
-  @extend %item-list__item--link;
+.item-list--wards {
+  @extend %item-list--links;
 
-  label {
-    margin: 0;
-    padding: 0.5em 1em;
+  &.govuk-checkboxes--small {
+    .govuk-checkboxes__item {
+      float: none; // Overrides float:left from govuk-checkboxes--small
+      margin-left: 1em; // As otherwise no left margin
+    }
+  }
+
+  a {
+    margin-left: calc(-1em + -34px); // for the padding-left on govuk-checkboxes__item + padding of item-list--wards
+    margin-bottom: 0.5rem;
   }
 }
 
+.item-list--reports {
+  @extend %item-list--links;
+}
+
 .item-list--reports__item {
-  @extend %item-list__item--link;
+  padding: 0;
 
   a {
     @include clearfix;
-    padding: flip(0 0 0 1em, 0 1em 0 0);
+    padding: 0 1em;
 
     @media print {
       padding: 0;
@@ -1273,14 +1383,14 @@ input.final-submit {
 
   @media print {
     display: block;
-    @include flex-container();
-    @include flex-wrap(wrap);
+    display: flex;
+    flex-wrap: wrap;
   }
 
   & > * {
     margin-top: 0.5em;
     width: 33%;
-    @include flex(0 0 auto);
+    flex: 0 0 auto;
   }
 
   h4 {
@@ -1370,31 +1480,31 @@ input.final-submit {
 
 .item-list__item__shortlist-add {
   @extend %list-item-action-button;
-  @include svg-background-image("/cobrands/fixmystreet/images/icon-shortlist-inactive");
+  background-image: url("/cobrands/fixmystreet/images/icon-shortlist-inactive.svg");
 
   &:hover,
   &:focus {
-    @include svg-background-image("/cobrands/fixmystreet/images/icon-shortlist-inactive-hover");
+    background-image: url("/cobrands/fixmystreet/images/icon-shortlist-inactive-hover.svg");
   }
 }
 
 .item-list__item__shortlist-remove {
   @extend %list-item-action-button;
-  @include svg-background-image("/cobrands/fixmystreet/images/icon-shortlist-active");
+  background-image: url("/cobrands/fixmystreet/images/icon-shortlist-active.svg");
 
   &:hover,
   &:focus {
-    @include svg-background-image("/cobrands/fixmystreet/images/icon-shortlist-active-hover");
+    background-image: url("/cobrands/fixmystreet/images/icon-shortlist-active-hover.svg");
   }
 }
 
 .item-list__item__shortlist-take {
   @extend %list-item-action-button;
-  @include svg-background-image("/cobrands/fixmystreet/images/icon-shortlist-taken");
+  background-image: url("/cobrands/fixmystreet/images/icon-shortlist-taken.svg");
 
   &:hover,
   &:focus {
-    @include svg-background-image("/cobrands/fixmystreet/images/icon-shortlist-taken-hover");
+    background-image: url("/cobrands/fixmystreet/images/icon-shortlist-taken-hover.svg");
   }
 }
 
@@ -1404,18 +1514,18 @@ input.final-submit {
   padding-top: 24px; // half the normal height, because shorter icon
   background-size: 24px 14px;
 
-  @include svg-background-image("/cobrands/fixmystreet/images/icon-shortlist-up");
+  background-image: url("/cobrands/fixmystreet/images/icon-shortlist-up.svg");
 
   &:hover,
   &:focus {
-    @include svg-background-image("/cobrands/fixmystreet/images/icon-shortlist-up-hover");
+    background-image: url("/cobrands/fixmystreet/images/icon-shortlist-up-hover.svg");
   }
 
   &[disabled] {
     opacity: 0.5;
     cursor: default;
 
-    @include svg-background-image("/cobrands/fixmystreet/images/icon-shortlist-up");
+    background-image: url("/cobrands/fixmystreet/images/icon-shortlist-up.svg");
   }
 }
 
@@ -1426,18 +1536,18 @@ input.final-submit {
   padding-top: 24px; // half the normal height, because shorter icon
   background-size: 24px 14px;
 
-  @include svg-background-image("/cobrands/fixmystreet/images/icon-shortlist-down");
+  background-image: url("/cobrands/fixmystreet/images/icon-shortlist-down.svg");
 
   &:hover,
   &:focus {
-    @include svg-background-image("/cobrands/fixmystreet/images/icon-shortlist-down-hover");
+    background-image: url("/cobrands/fixmystreet/images/icon-shortlist-down-hover.svg");
   }
 
   &[disabled] {
     opacity: 0.5;
     cursor: default;
 
-    @include svg-background-image("/cobrands/fixmystreet/images/icon-shortlist-down");
+    background-image: url("/cobrands/fixmystreet/images/icon-shortlist-down.svg");
   }
 }
 
@@ -1480,7 +1590,7 @@ input.final-submit {
   font-weight: bold;
   padding: 0.2em 0.5em;
   vertical-align: -0.1em;
-  background: #888;
+  background: #666;
   color: #fff;
   border-radius: 0.3em;
   margin-#{$right}: 0.1em;
@@ -1488,7 +1598,7 @@ input.final-submit {
 
 .item-list__item--empty {
   background: none;
-  color: #777;
+  color: #666;
 
   p {
     margin: 0;
@@ -1571,10 +1681,10 @@ input.final-submit {
 
 .item-list__item--expandable__actions {
   clear: both; // clear floated .update-img images
-  @include flex-container();
+  display: flex;
 
   & > * {
-    @include flex(1); // Force equal width children
+    flex: 1; // Force equal width children
   }
 }
 
@@ -1658,7 +1768,7 @@ input.final-submit {
       background-repeat: no-repeat;
       background-position: 50% 50%;
       background-size: 16px 16px;
-      @include svg-background-image("/cobrands/fixmystreet/images/magnify");
+      background-image: url("/cobrands/fixmystreet/images/magnify.svg");
     }
 
     &:hover span {
@@ -1700,7 +1810,7 @@ input.final-submit {
     vertical-align: -0.15em;
     background-size: 112px 16px;
     background-repeat: no-repeat;
-    @include svg-background-image("/cobrands/fixmystreet/images/report-tools");
+    background-image: url("/cobrands/fixmystreet/images/report-tools.svg");
     background-position: flip(0 0, -16px 0);
   }
 }
@@ -1790,7 +1900,7 @@ input.final-submit {
   background-position: 1em 50%;
   background-repeat: no-repeat;
   background-size: 2em 2em;
-  @include svg-background-image("/cobrands/fixmystreet/images/shortlist");
+  background-image: url("/cobrands/fixmystreet/images/shortlist.svg");
 
   h3 {
     margin: 0;
@@ -1885,6 +1995,14 @@ html.js #map .noscript {
   filter: none !important; // Override OpenLayers PNG handling of the navigation
   background-color: #222222;
   color: transparent !important;
+  text-indent: -9999px; // This prevent the odd extra rectangles when the button is being focused. Screen readers still announce the content.
+
+  &:focus {
+    background-color: #222; // In case there is rule in a cobrand overriding the background of links.
+    filter: invert(1) !important; // See filter rule for the default state.
+    outline: 2px solid #fff;
+    outline-offset: -2px;
+  }
 }
 
 #ns_fms_pan_zoom_panup,
@@ -2033,16 +2151,32 @@ html.js #map .noscript {
     }
   }
 
+  a:focus {
+    background-color: #222; // In case there is rule in a cobrand overriding the background of links.
+    filter: invert(1);
+    outline: 2px solid #fff;
+    outline-offset: -2px;
+  }
+
+
   .map-layer-toggle {
-    @include svg-background-image("/cobrands/fixmystreet/images/map-layer-aerial");
+    background-image: url("/cobrands/fixmystreet/images/map-layer-aerial.svg");
   }
 
   .map-layer-toggle.roads {
-    @include svg-background-image("/cobrands/fixmystreet/images/map-layer-roads");
+    background-image: url("/cobrands/fixmystreet/images/map-layer-roads.svg");
   }
 
   .map-pins-toggle {
-    @include svg-background-image("/cobrands/fixmystreet/images/hide-pins-link");
+    background-image: url("/cobrands/fixmystreet/images/hide-pins-link.svg");
+  }
+
+  .js-recentre-map {
+    background-image: url("/cobrands/fixmystreet/images/geolocate-link-icon.svg");
+
+    &.loading {
+      background-image: url("/cobrands/fixmystreet/images/geolocate-link-loading.svg");
+    }
   }
 }
 
@@ -2054,7 +2188,7 @@ html.js #map .noscript {
   margin-#{$left}: 8px;
   vertical-align: -0.1em;
   background-size: 108px 12px;
-  @include svg-background-image("/cobrands/fixmystreet/images/map-tools");
+  background-image: url("/cobrands/fixmystreet/images/map-tools.svg");
 }
 
 // Generic component for presenting a semi-transparent black toolbar
@@ -2064,7 +2198,7 @@ html.js #map .noscript {
 // in the mobile reporting view, and for the "Hide pins / Get updates"
 // etc links on mobile and desktop map pages.
 .sub-map-links {
-  @include flex-container();
+  display: flex;
 
   position: absolute;
   #{$left}: 0;
@@ -2073,8 +2207,8 @@ html.js #map .noscript {
   margin: 0;
 
   a {
-    @include box-sizing(border-box);
-    @include flex(1 1 auto);
+    box-sizing: border-box;
+    flex: 1 1 auto;
 
     display: inline-block; // fallback for non-flexbox browsers
     color: inherit;
@@ -2133,14 +2267,14 @@ html.js #map .noscript {
   display: none;
 
   position: absolute;
-  #{$left}: 25%;
-  #{$right}: 25%;
+  #{$left}: 2em;
+  #{$right}: 2em;
   bottom: 0;
   margin: 0;
-  margin-bottom: 6em;
-  margin-bottom: calc(env(safe-area-inset-bottom) + 6em);
+  margin-bottom: 5em;
+  margin-bottom: calc(env(safe-area-inset-bottom) + 5em);
 
-  @include border-radius(0.5em);
+  border-radius: 0.5em;
 
   padding: 0.5em;
   font-size: 1em;
@@ -2184,7 +2318,7 @@ html.js #map .noscript {
     background-size: 106px 106px;
     background-position: center center;
     background-repeat: no-repeat;
-    @include svg-background-image("/i/crosshairs");
+    background-image: url("/i/crosshairs.svg");
     .map-with-crosshairs1 &, .map-with-crosshairs2 &, .map-with-crosshairs3 & {
         display: block;
     }
@@ -2240,12 +2374,17 @@ html.js #map .noscript {
 .map-page .js-mobile-not-an-asset,
 .only-map .category_meta_message {
   position: absolute;
-  bottom: 3em;
+  top: 2.25em;
   #{$left}: 0.25em;
-  #{$right}: 0.25em;
+  #{$right}: 3.25em;
   padding: 0.25em;
   color: #fff;
   background-color: black;
+  background-color: rgba(0,0,0,0.7);
+
+  p:last-child {
+    margin-bottom: 0;
+  }
 }
 
 .olControlAttribution {
@@ -2395,8 +2534,8 @@ label .muted {
 
 .form-hint {
   display: block;
-  color: #666;
   margin-bottom: 0.5em;
+  color: #666;
 
   // Reduce space between labels and their form-hints
   label + & {
@@ -2471,8 +2610,7 @@ label .muted {
     margin-bottom: 0;
   }
 
-  .btn,
-  .btn-primary {
+  .btn {
     margin: 0.5em 0 1em 0;
 
     &:first-child {
@@ -2560,7 +2698,7 @@ label .muted {
 
 .alert {
   margin: 0 -1em 1em;
-  background: #ff0000;
+  background: $error_color;
   padding: 1em;
   color: #fff;
   a,
@@ -2609,57 +2747,34 @@ label .muted {
   visibility: hidden;
 }
 
+.hidden-highways-choice, .hidden-category-filter {
+  display: none !important;
+  visibility: hidden;
+}
+
 /* Front page */
 #front-main {
-  text-align: center;
-  margin: 1em;
+  margin: 1em 0;
+  background: $front-main-background;
+  color: $front-main-color;
+  @if not (($front-main-background == transparent) or ($front-main-background == none)) {
+    padding: 1em;
+    margin-top: 0;
+  }
+  @if not (($front-main-background == transparent) or ($front-main-background == none)) {
+      #front-main-container {
+      margin:0 -1em;
+    }
+  }
+  #front-main-container {
+    padding:0 1em;
+  }
   h2 {
     font-style: italic;
     font-family: $meta-font;
     font-size: 1.1875em;
-    color: #4d4d4d;
-  }
-  p {
-    margin: 0.5em 0 0;
-  }
-  #postcodeForm {
-    margin: 0 -1em;
-    padding: 1em;
-    color: $primary_text;
-    background: $primary;
-    font-family: $meta-font;
-    label {
-      margin: 0;
-    }
-    .form-hint {
-      margin-bottom: 0.5em;
-    }
-    div {
-      @include flex-container;
-      @include flex-wrap(wrap);
-      width: 100%;
-      background: #fff;
-      border: 1px solid $primary_b;
-      input#pc {
-        @include flex(86 0 auto);
-        width: 50%;
-        border: none;
-        background: none;
-        line-height: 1.5em;
-      }
-      input#sub {
-        border: none;
-        padding: 0.5em;
-        @include flex(14 0 auto);
-        background: #000;
-        color: #fff;
-        @include border-radius(0);
-        &:hover,
-        &:focus {
-          background: #333;
-        }
-      }
-    }
+    color: $front-main-h2-color;
+    margin-top: 0;
   }
   a {
     text-decoration: $primary_link_decoration;
@@ -2669,15 +2784,75 @@ label .muted {
   }
 }
 
+.postcode-form-box {
+  color: $postcodeform-color;
+  background: $postcodeform-background;
+  @if not (($postcodeform-background == transparent) or ($postcodeform-background == none)) {
+    padding: 1em;
+    margin: 0 -1em;
+  } @else {
+    padding: 0;
+    margin: 1em 0
+  }
+  font-family: $meta-font;
+  label {
+    margin-top: 0;
+  }
+  .form-hint {
+    margin-bottom: 0.5em;
+    color: $form-hint-color;
+  }
+  div {
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
+    background: #fff;
+    border: 1px solid $primary_b;
+  }
+  input#pc {
+    flex: 86 0 auto;
+    width: 50%;
+    border: none;
+    background: none;
+    line-height: 1.5em;
+  }
+  input#sub {
+    border: none;
+    padding: 0.5em;
+    flex: 14 0 auto;
+    background: #000;
+    color: #fff;
+    border-radius: 0;
+    &:hover,
+    &:focus {
+      background: #333;
+    }
+  }
+
+  ul {
+    margin-top: 2em;
+  }
+}
 
 
 
 a#geolocate_link {
   border: 1px solid $geolocation-link-border;
   color: $geolocation-link;
+  background-color: $geolocation-link-background-color;
   @include button-size($button-margin-top: 15px);
-  @include flex-container-inline();
-  @include flex-align(center);
+  display: inline-flex;
+  align-items: center;
+
+  &:hover {
+    border-color: $geolocation-link-background-color;
+    background-color: $geolocation-link;
+    @if $geolocation-link-background-color == transparent {
+      color: #fff;
+    } @else {
+        color: $geolocation-link-background-color;
+    }
+  }
 }
 
 .no-js #geolocate_link {
@@ -2749,19 +2924,6 @@ a#geolocate_link {
   }
 }
 
-#alerts {
-  ul {
-    margin-bottom: 1em;
-  }
-  li {
-    padding: 0em;
-    margin-bottom: 0.5em;
-  }
-  .a {
-    background: #f6f6f6;
-  }
-}
-
 .alerts-rss-link {
   position: relative;
   z-index: 1; // stack in front of the position:relative .label-containing-checkbox
@@ -2770,6 +2932,17 @@ a#geolocate_link {
     margin-top: 4px;
     margin-#{$left}: 0.5em;
     float: $right;
+  }
+
+  &:focus {
+    outline: none;
+    img {
+      outline: 0.1rem solid $button-primary-focus-bg-top;
+      outline-offset: 0.1rem;
+      -webkit-box-shadow: 0px 0px 0px 5px #000;
+      -moz-box-shadow: 0px 0px 0px 5px #000;
+      box-shadow: 0px 0px 0px 5px #000;
+    }
   }
 }
 
@@ -2786,6 +2959,7 @@ a#geolocate_link {
 .alerts__nearby-activity__photos {
   white-space: nowrap;
   overflow: hidden;
+  overflow-x: scroll;
   margin: 0 -1rem;
 
   a {
@@ -2822,9 +2996,15 @@ a#geolocate_link {
   }
 }
 
+.cta-box__input-wrapper {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
 #rss_local_alt {
   // Match .label-containing-checkbox
-  padding-#{$left}: 24px;
+  padding-#{$left}: 56px;
 
   // Close up space between this and #rss_local
   margin-top: -0.5em;
@@ -2835,22 +3015,32 @@ a#geolocate_link {
   }
 }
 
+.alert-option-wrapper {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
 .confirmation-header {
   padding: 140px 0 2em;
   text-align: center;
 
-  background: transparent url(/cobrands/fixmystreet/images/tick-in-circle-100px.png) center 1em no-repeat;
+  background: transparent url(/cobrands/fixmystreet/images/tick-in-circle.svg) center 1em / 100px no-repeat;
 
   &.confirmation-header--failure {
-    background-image: url(/cobrands/fixmystreet/images/sad-face-in-circle-100px.png);
+    background-image: url(/cobrands/fixmystreet/images/sad-face-in-circle.svg);
   }
 
   &.confirmation-header--inbox {
-    background-image: url(/cobrands/fixmystreet/images/inbox-in-circle-100px.png);
+    background-image: url(/cobrands/fixmystreet/images/inbox-in-circle.svg);
   }
 
   &.confirmation-header--phone {
-    background-image: url(/cobrands/fixmystreet/images/phone-in-circle-100px.png);
+    background-image: url(/cobrands/fixmystreet/images/phone-in-circle.svg);
+  }
+
+  &.confirmation-header--blank {
+    background-image: none;
   }
 
   h1,
@@ -2881,6 +3071,11 @@ a#geolocate_link {
     color: #666666;
     font-size: 1.2em;
     margin-bottom: 0.5em;
+    word-break: break-word; // It prevents screen overflow when there is a long url, when a page has not been found.
+  }
+
+  &.confirmation-header--failure small {
+    color: #888888;
   }
 
   & > :last-child {
@@ -2936,7 +3131,7 @@ a#geolocate_link {
 
 .segmented-control {
   @include clearfix();
-  @include flex-container(); // fancy full-width buttons for browsers that support flexbox
+  display: flex; // fancy full-width buttons for browsers that support flexbox
 
   & > * {
     display: block;
@@ -2944,7 +3139,7 @@ a#geolocate_link {
     border-#{$right}-width: 0; // avoid double border between items
     float: #{$left}; // float fallback for browsers that don't support flexbox
     position: relative; // Make sure this is shown on legacy flexbox webkit
-    @include flex(1 0 auto, 1);
+    flex: 1 0 auto;
   }
 
   .btn {
@@ -3023,11 +3218,11 @@ a#geolocate_link {
 
 // Offline reporting UI
 #front-main {
-  .js-continue-draft {
+  .draft-info-box {
     display:flex;
     justify-content:center;
   }
-  .js-continue-draft p {
+  .draft-info-box p {
     background-color: #ff3333;
     padding: 0.5em 1em;
   }
@@ -3043,14 +3238,9 @@ a#geolocate_link {
   }
 }
 
-.submit-and-cancel {
-  display: flex;
-  align-items: center;
-}
-.submit-and-cancel a {
-  border-left: solid 1px #999;
-  padding-left: 1em;
-  margin-left: 1em;
+#offline_draft_list .js-delete-draft {
+  margin-top: 0.5em;
+  color: rgb(147, 0, 0)
 }
 
 @media screen {
@@ -3182,16 +3372,39 @@ $nicetable-hover-background: rgba($primary, 0.15) !default;
   }
 }
 
-$emergency-message-border: 1px solid #525252 !default;
+$site-message-border: 1px solid #525252 !default;
 
-.emergency-message {
-  border: $emergency-message-border;
+.site-message {
+  border: $site-message-border;
   padding: 1em;
   font-size: 1em;
   margin: 0 0 2em;
 
   & > :last-child {
     margin-bottom: 0;
+  }
+}
+
+.js-post-category-messages,
+.extra-category-questions {
+  h2 {
+    font-size: 1.3rem;
+  }
+
+  h3 {
+    font-size: 1.2rem;
+  }
+
+  h3, h4 {
+    font-weight: bold;
+  }
+
+  img {
+    margin-bottom: 1rem;
+  }
+
+  :first-child {
+    margin-top: 0; //Avoids extra spacing caused by inherited margins
   }
 }
 
@@ -3206,6 +3419,7 @@ $emergency-message-border: 1px solid #525252 !default;
 @import "_dashboard";
 @import "_top-banner";
 @import "_search-help";
+@import "_page-with-sticky-content-bar";
 
-$govuk-focus-colour: $primary !default;
-@import "../../vendor/govuk-frontend/radios";
+@import "govuk-frontend/forms";
+@import "_govuk"; // Adds some overrides to the default GOVUK behaviour

@@ -22,9 +22,9 @@ my $user = FixMyStreet::DB->resultset('User')->find_or_create(
 );
 
 my %bodies = (
-    2237 => FixMyStreet::DB->resultset("Body")->create({ name => 'Oxfordshire', extra => { cobrand => 'oxfordshire' } }),
-    2494 => FixMyStreet::DB->resultset("Body")->create({ name => 'Bexley', extra => { cobrand => 'bexley' }  }),
-    2636 => FixMyStreet::DB->resultset("Body")->create({ name => 'Isle of Wight', extra => { cobrand => 'isleofwight' }  }),
+    2237 => FixMyStreet::DB->resultset("Body")->create({ name => 'Oxfordshire', cobrand => 'oxfordshire' }),
+    2494 => FixMyStreet::DB->resultset("Body")->create({ name => 'Bexley', cobrand => 'bexley' }),
+    2636 => FixMyStreet::DB->resultset("Body")->create({ name => 'Isle of Wight', cobrand => 'isleofwight' }),
     2482 => FixMyStreet::DB->resultset("Body")->create({
         name => 'Bromley',
         send_method => 'Open311',
@@ -32,7 +32,7 @@ my %bodies = (
         endpoint => 'endpoint',
         comment_user_id => $user->id,
         blank_updates_permitted => 1,
-        extra => { cobrand => 'bromley' }
+        cobrand => 'bromley',
     }),
     2651 => FixMyStreet::DB->resultset("Body")->create({ name => 'Edinburgh' }),
 );
@@ -613,6 +613,41 @@ subtest 'Update with media_url includes image in update' => sub {
   };
 };
 
+subtest 'Other image type media_url' => sub {
+  my $UPLOAD_DIR = tempdir( CLEANUP => 1 );
+  FixMyStreet::override_config {
+    PHOTO_STORAGE_BACKEND => 'FileSystem',
+    PHOTO_STORAGE_OPTIONS => {
+        UPLOAD_DIR => $UPLOAD_DIR,
+    },
+  }, sub {
+    my $guard = LWP::Protocol::PSGI->register(t::Mock::Static->to_psgi_app, host => 'example.com');
+
+    my $local_requests_xml = setup_xml($problem->external_id, 1, "");
+    $local_requests_xml =~ s#</service_request_id>#</service_request_id>
+        <media_url>http://example.com/image.gif</media_url>#;
+    my $o = Open311->new( jurisdiction => 'mysociety', endpoint => 'http://example.com' );
+    Open311->_inject_response('/servicerequestupdates.xml', $local_requests_xml);
+
+    $problem->lastupdate( DateTime->now()->subtract( days => 1 ) );
+    $problem->state('confirmed');
+    $problem->update;
+
+    my $update = Open311::GetServiceRequestUpdates->new(
+        system_user => $user,
+        current_open311 => $o,
+        current_body => $bodies{2482},
+    );
+    $update->process_body;
+
+    is $problem->comments->count, 1, 'comment count';
+    my $c = $problem->comments->first;
+    is $c->external_id, 638344;
+    is $c->photo, 'b3aac4d2d68ac3486e9ecb99cd5f5c6c7be18335.gif', 'photo exists';
+    $problem->comments->delete;
+  };
+};
+
 subtest 'Update with customer_reference adds reference to problem' => sub {
     my $guard = LWP::Protocol::PSGI->register(t::Mock::Static->to_psgi_app, host => 'example.com');
 
@@ -980,7 +1015,7 @@ subtest 'check that external_status_code is stored correctly' => sub {
     $problem->discard_changes;
     is $problem->comments->count, 2, 'two comments after fetching updates';
 
-    my @comments = $problem->comments->search(undef, { order_by => [ 'created' ] } )->all;
+    my @comments = $problem->comments->order_by('created')->all;
 
     is $comments[0]->get_extra_metadata('external_status_code'), "060", "correct external status code on first comment";
     is $comments[1]->get_extra_metadata('external_status_code'), "101", "correct external status code on second comment";
@@ -1292,7 +1327,7 @@ foreach my $test (
 
         is $problem->comments->count, 2, 'two comment after fetching updates';
 
-        my @updates = $problem->comments->search(undef, { order_by => { -asc => 'created' } })->all;
+        my @updates = $problem->comments->order_by('created')->all;
         is $updates[0]->external_id, 'auto-internal', "Automatic update is the earlier update";
         is $updates[1]->created, $updates[0]->created->add( seconds => 1), "New update is one second later than automatic update";
         $problem->comments->delete;
@@ -1369,7 +1404,7 @@ for my $test (
         $problem->discard_changes;
         is $problem->comments->count, 2, 'two comment after fetching updates';
 
-        my @comments = $problem->comments->search(undef, { order_by => 'confirmed' });
+        my @comments = $problem->comments->order_by('confirmed');
 
         is $comments[0]->text, "Thank you for your report. We will provide an update within 48 hours.", "correct external status code on first comment";
         is $comments[1]->text, "Thank you for your report. We will provide an update within 24 hours.", "correct external status code on second comment";
@@ -1696,13 +1731,15 @@ subtest 'check matching on fixmystreet_id overrides service_request_id' => sub {
     </service_requests_updates>
     };
 
-    $problem->comments->delete;
-
     my $dt2 = $dt->clone->subtract( minutes => 30 );
     my $dt3 = $dt2->clone->subtract( minutes => 30 );
     $requests_xml =~ s/UPDATED_DATETIME3/$dt/;
     $requests_xml =~ s/UPDATED_DATETIME2/$dt2/;
     $requests_xml =~ s/UPDATED_DATETIME/$dt3/;
+
+    $problem->whensent( $dt3->clone->subtract( minutes => 30 ) );
+    $problem->update;
+    $problem->comments->delete;
 
     my $o = Open311->new( jurisdiction => 'mysociety', endpoint => 'http://example.com' );
     Open311->_inject_response('/servicerequestupdates.xml', $requests_xml);
@@ -1718,7 +1755,7 @@ subtest 'check matching on fixmystreet_id overrides service_request_id' => sub {
     $problem->discard_changes;
     is $problem->comments->count, 2, 'two comments after fetching updates';
 
-    my @comments = $problem->comments->search(undef, { order_by => [ 'created' ] } )->all;
+    my @comments = $problem->comments->order_by('created')->all;
 
     is $comments[0]->external_id, 638344, "correct first comment added";
     is $comments[1]->external_id, 638356, "correct second comment added";

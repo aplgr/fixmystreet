@@ -84,13 +84,15 @@ has_page existing => (
 has_page details => (
     title_ggw => 'Subscribe to the %s',
     template => 'waste/garden/subscribe_details.html',
-    fields => ['current_bins', 'bins_wanted', 'payment_method', 'cheque_reference', 'name', 'email', 'phone', 'password', 'continue_review'],
+    fields => ['current_bins', 'bins_wanted', 'payment_method', 'cheque_reference', 'name', 'email', 'phone', 'password', 'email_renewal_reminders', 'continue_review'],
     field_ignore_list => sub {
         my $page = shift;
         my $c = $page->form->c;
-        return ['payment_method', 'cheque_reference', 'password'] if $c->stash->{staff_payments_allowed} && !$c->cobrand->waste_staff_choose_payment_method;
-        return ['password'] if $c->stash->{staff_payments_allowed};
-        return ['password'] if $c->cobrand->call_hook('waste_password_hidden');
+        my @fields;
+        push @fields, 'email_renewal_reminders' if !$c->cobrand->garden_subscription_email_renew_reminder_opt_in;
+        push @fields, 'password' if $c->stash->{staff_payments_allowed} or $c->cobrand->call_hook('waste_password_hidden');
+        push @fields, ('payment_method', 'cheque_reference') if $c->stash->{staff_payments_allowed} && !$c->cobrand->waste_staff_choose_payment_method;
+        return \@fields;
     },
     update_field_list => \&details_update_fields,
     next => 'summary',
@@ -193,8 +195,8 @@ has_field current_bins => (
 );
 
 sub bins_wanted_label_method {
-    my $self = shift;
-    my $max_bins = $self->parent->{c}->stash->{garden_form_data}->{max_bins};
+    my ($self, $max_bins) = @_;
+    $max_bins ||= $self->parent->{c}->stash->{garden_form_data}->{max_bins};
     return "Number of bins to be emptied (including bins already on site) (0-$max_bins)";
 }
 
@@ -228,14 +230,9 @@ has_field password => (
     },
 );
 
-has_field tandc => (
-    type => 'Checkbox',
-    required => 1,
-    label => 'Terms and conditions',
-    option_label => FixMyStreet::Template::SafeString->new(
-        'I agree to the <a href="/about/garden_terms" target="_blank">terms and conditions</a>',
-    ),
-);
+with 'FixMyStreet::App::Form::Waste::Garden::EmailRenewalReminders';
+
+with 'FixMyStreet::App::Form::Waste::GardenTandC';
 
 has_field continue => (
     type => 'Submit',

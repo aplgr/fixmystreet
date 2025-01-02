@@ -4,7 +4,9 @@ use parent 'FixMyStreet::Cobrand::Whitelabel';
 use strict;
 use warnings;
 use Moo;
-with 'FixMyStreet::Roles::CobrandOpenUSRN';
+with 'FixMyStreet::Roles::Cobrand::OpenUSRN';
+with 'FixMyStreet::Cobrand::Merton::Waste';
+with 'FixMyStreet::Roles::Open311Multi';
 
 sub council_area_id { 2500 }
 sub council_area { 'Merton' }
@@ -30,6 +32,8 @@ sub disambiguate_location {
 sub report_validation {
     my ($self, $report, $errors) = @_;
 
+    return if ($report->cobrand_data || '') eq 'waste';
+
     my @extra_fields = @{ $report->get_extra_fields() };
 
     my %max = (
@@ -41,7 +45,8 @@ sub report_validation {
     foreach my $extra ( @extra_fields ) {
         my $max = $max{$extra->{name}} || 100;
         if ( length($extra->{value}) > $max ) {
-            $errors->{'x' . $extra->{name}} = qq+Your answer to the question: "$extra->{description}" is too long. Please use a maximum of $max characters.+;
+            my $desc = $extra->{description} || $extra->{name};
+            $errors->{'x' . $extra->{name}} = qq+Your answer to the question: "$desc" is too long. Please use a maximum of $max characters.+;
         }
     }
 
@@ -54,13 +59,11 @@ sub get_geocoder { 'OSM' }
 
 sub admin_user_domain { 'merton.gov.uk' }
 
-sub allow_anonymous_reports { 'button' }
-
 # Merton requested something other than @merton.gov.uk due to their CRM misattributing reports to staff.
 sub anonymous_domain { 'anonymous-fms.merton.gov.uk' }
 
 sub open311_config {
-    my ($self, $row, $h, $params) = @_;
+    my ($self, $row, $h, $params, $contact) = @_;
 
     $params->{multi_photos} = 1;
     $params->{upload_files} = 1;
@@ -77,8 +80,8 @@ sub reopening_disallowed {
     return 1;
 }
 
-sub open311_extra_data_include {
-    my ($self, $row, $h) = @_;
+sub open311_update_missing_data {
+    my ($self, $row, $h, $contact) = @_;
 
     # Reports made via FMS.com or the app probably won't have a USRN
     # value because we don't access the USRN layer on those
@@ -91,6 +94,52 @@ sub open311_extra_data_include {
     }
 
     return [];
+}
+
+sub open311_extra_data_include {
+    my ($self, $row, $h) = @_;
+
+    my $open311_only = [];
+
+    my $contributed_by = $row->get_extra_metadata('contributed_by');
+    my $contributing_user = FixMyStreet::DB->resultset('User')->find({ id => $contributed_by });
+    if ($contributing_user) {
+        push @$open311_only, {
+            name => 'contributed_by',
+            value => $contributing_user->email,
+        };
+    }
+
+    if ($h->{sending_to_crimson}) {
+        # Want to send bulky item names rather than IDs
+        if ($row->category eq 'Bulky collection') {
+            my @fields = sort grep { /^item_\d/ } keys %{$row->get_extra_metadata};
+            my @ids = map { $row->get_extra_metadata($_) } @fields;
+            my $ids = join('::', @ids);
+            $row->update_extra_field({ name => 'Bulky_Collection_Bulky_Items', value => $ids });
+            push @$open311_only, { name => 'Current_Item_Count', value => scalar @ids };
+
+            if (my $previous = $row->get_extra_metadata('previous_booking_id')) {
+                $previous = FixMyStreet::DB->resultset("Problem")->find($previous);
+                push @$open311_only, { name => 'previous_booking_id', value => $previous->id };
+                my $echo_id = $previous->get_extra_field_value('echo_id');
+                push @$open311_only, { name => 'previous_echo_id', value => $echo_id };
+            }
+        }
+        # Do not want to send multiple Action/Reason codes
+        foreach (qw(Action Reason)) {
+            my $var = $row->get_extra_field_value($_) || '';
+            if ($var =~ /::/) {
+                $var =~ s/::.*//;
+                $row->update_extra_field({ name => $_, value => $var });
+            }
+        }
+    }
+
+    return $open311_only;
+};
+
+sub open311_munge_update_params {
 }
 
 sub report_new_munge_before_insert {
@@ -116,5 +165,41 @@ sub cut_off_date { '2021-12-13' } # Merton cobrand go-live
 sub report_age { '3 months' }
 
 sub abuse_reports_only { 1 }
+
+=head2 categories_restriction
+
+Hide TfL's River Piers categories on the Merton cobrand.
+
+=cut
+
+sub categories_restriction {
+    my ($self, $rs) = @_;
+
+    return $rs->search( { 'me.category' => { -not_like => 'River Piers%' } } );
+}
+
+sub open311_pre_send {
+    my ($self, $row, $open311) = @_;
+
+    # if this report has already been sent to Echo and we're re-sending to Dynamics,
+    # need to keep the original external_id so we can restore it afterwards.
+    $self->{original_external_id} = $row->external_id;
+}
+
+around open311_post_send => sub {
+    my ($orig, $self, $row, $h, $sender) = @_;
+
+    # restore original external_id for this report, and store new Dynamics ID
+    if ( $self->{original_external_id} ) {
+        if ($row->external_id ne $self->{original_external_id}) {
+            $row->set_extra_metadata( crimson_external_id => $row->external_id );
+            $row->external_id($self->{original_external_id});
+            $row->update;
+        }
+        delete $self->{original_external_id};
+    }
+
+    return $orig->($self, $row, $h, $sender);
+};
 
 1;

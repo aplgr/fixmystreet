@@ -12,6 +12,7 @@ use base 'DBIx::Class::Schema';
 __PACKAGE__->load_namespaces(
     result_namespace => "+FixMyStreet::DB::Result",
     resultset_namespace => "+FixMyStreet::DB::ResultSet",
+    default_resultset_class => '+FixMyStreet::DB::ResultSet',
 );
 
 
@@ -26,7 +27,7 @@ __PACKAGE__->connection(FixMyStreet->dbic_connect_info);
 
 has lang => ( is => 'rw' );
 
-has cobrand => ( is => 'rw' );
+has cobrand => ( is => 'rw', weak_ref => 1 );
 
 has cache => ( is => 'rw', lazy => 1, default => sub { {} } );
 

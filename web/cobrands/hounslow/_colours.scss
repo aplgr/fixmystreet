@@ -39,6 +39,28 @@ $heading-font: InfoText, Frutiger, Arial, sans-serif;
 $body-font: Frutiger, Arial, sans-serif;
 $meta-font: $body-font;
 
+$geolocation-link: $base_bg;
+$geolocation-link-border: $base_bg;
+$geolocation-link-background-color: $base_fg;
+
 $search-help-background: #fff3f3;
 $search-help-header-background: $red;
 $search-help-header-font-size-desktop: 1.25em;
+
+$front-main-color:$primary_b;
+$form-hint-color: $primary_text;
+$form-hint-color-desktop: $primary_text;
+$front-main-color-desktop:$primary_text;
+$front-main-background-desktop: $primary;
+$geolocation-link: $primary_text;
+
+$mobile-sticky-sidebar-button-menu-image: "menu-white";
+
+$button-primary-bg-top: $green;
+$button-primary-border: transparent;
+$button-primary-text: #fff;
+
+$button-primary-hover-bg-top: lighten($green, 5%);
+$button-primary-hover-bg-bottom: lighten($green, 5%);
+$button-primary-hover-border: transparent;
+$button-primary-hover-text: #fff;

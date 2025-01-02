@@ -2,19 +2,19 @@
 
 <h1 class="govuk-heading-xl">Enter paye.net code</h1>
 
-<form name="post" method="post" action="[% c.uri_for('csc_payment') %]">
-<input type="text" name="payenet_code" id="payenet_code"  value="[% payenet_code %]"[% IF report.category == 'Bulky collection' %] required[% END %]/>
+<form name="post" method="post" action="[% c.uri_for_action('waste/csc_payment') %]">
+<input type="text" name="payenet_code" id="payenet_code"  value="[% payenet_code %]" required>
 <input type="hidden" name="report_id" id="report_id"  value="[% report.id %]" />
 <input type="hidden" name="token" id="token"  value="[% csrf_token %]" />
 
 <div class="govuk-form-group">
     <p>
-    <input class="govuk-button" type="submit" value="[% IF report.category == 'Bulky collection' %]Confirm Booking[% ELSE %]Confirm Subscription[% END %]">
+    <input class="govuk-button" type="submit" value="[% IF report.category == 'Bulky collection' %]Confirm Booking[% ELSE %]Confirm Payment[% END %]">
     </p>
 </div>
 </form>
 
-<form name="post" method="post" action="[% c.uri_for('csc_payment_failed') %]">
+<form name="post" method="post" action="[% c.uri_for_action('waste/csc_payment_failed') %]">
 <input type="hidden" name="report_id" id="report_id"  value="[% report.id %]" />
 <input type="hidden" name="token" id="token"  value="[% csrf_token %]" />
 

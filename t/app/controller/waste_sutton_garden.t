@@ -1,4 +1,4 @@
-use utf8;
+use JSON::MaybeXS;
 use Test::MockModule;
 use Test::MockTime qw(:all);
 use FixMyStreet::TestMech;
@@ -9,7 +9,7 @@ END { FixMyStreet::App->log->enable('info'); }
 
 my $mech = FixMyStreet::TestMech->new;
 
-my $body = $mech->create_body_ok(2498, 'Sutton Borough Council', {}, { cobrand => 'sutton' });
+my $body = $mech->create_body_ok(2498, 'Sutton Borough Council', { cobrand => 'sutton' });
 my $user = $mech->create_user_ok('test@example.net', name => 'Normal User');
 my $staff_user = $mech->create_user_ok('staff@example.org', from_body => $body, name => 'Staff User');
 $staff_user->user_body_permissions->create({ body => $body, permission_type => 'contribute_as_anonymous_user' });
@@ -217,6 +217,7 @@ subtest "check signature generation" => sub {
     my $params = {
         AMOUNT => 2000,
         ORDERID => 123456,
+        CN => "Matthew O’Neill",
         EMAIL => 'user@example.org',
     };
 
@@ -224,7 +225,35 @@ subtest "check signature generation" => sub {
 
     my $sha = $cobrand->garden_waste_generate_sig($params, $passphrase);
 
-    is $sha, "97AC0DA72C7EE3C7E93CD383A681266DE197FD23", "correct signature generated";
+    is $sha, "06BB8BCD34670AE7BDBC054D23B84B30DFDEBABA", "correct signature generated";
+};
+
+subtest "check garden waste container images" => sub {
+    my $cobrand = FixMyStreet::Cobrand::Sutton->new;
+
+    # Test garden waste bin image
+    my $bin_unit = {
+        garden_container => 26,  # Garden waste bin
+    };
+    my $bin_image = $cobrand->image_for_unit($bin_unit);
+    is_deeply $bin_image, {
+        type => 'svg',
+        data => $bin_image->{data},  # SVG data will vary
+        colour => '#41B28A',
+        lid_colour => '#8B5E3D',
+        recycling_logo => undef,
+    }, "garden waste bin shows as green bin with brown lid";
+
+    # Test garden waste sack image
+    my $sack_unit = {
+        garden_container => 28,  # Garden waste sack
+    };
+    my $sack_image = $cobrand->image_for_unit($sack_unit);
+    is_deeply $sack_image, {
+        type => 'svg',
+        data => $sack_image->{data},  # SVG data will vary
+        colour => '#F5F5DC',
+    }, "garden waste sack shows as cream colored sack";
 };
 
 FixMyStreet::override_config {
@@ -263,6 +292,7 @@ FixMyStreet::override_config {
         };
     });
     $echo->mock('GetServiceUnitsForObject', \&garden_waste_one_bin);
+    mock_CancelReservedSlotsForEvent($echo);
 
     subtest 'Look up of address not in correct borough' => sub {
         $mech->get_ok('/waste');
@@ -283,7 +313,6 @@ FixMyStreet::override_config {
         echo => { sutton => { url => 'http://example.org' } },
         waste => { sutton => 1 },
         payment_gateway => { sutton => {
-            cc_url => 'http://example.com',
             ggw_cost => [
                 {
                     start_date => '2020-01-01',
@@ -311,7 +340,7 @@ FixMyStreet::override_config {
             scpID => '1234',
             company_name => 'rbk',
             form_name => 'rbk_user_form',
-            cc_url => 'http://example.org/cc_submit',
+            epdq_url => 'http://example.org/cc_submit',
             sha_passphrase => 'XYZ123',
         } },
     },
@@ -320,9 +349,10 @@ FixMyStreet::override_config {
         user_id => $user->id,
         category => 'Garden Subscription',
         whensent => \'current_timestamp',
+        send_state => 'sent',
     });
     $p->title('Garden Subscription - New');
-    $p->update_extra_field({ name => 'property_id', value => 12345});
+    $p->update_extra_field({ name => 'property_id', value => '12345' });
     $p->update;
 
     my $sent_params = {};
@@ -338,7 +368,7 @@ FixMyStreet::override_config {
     ] });
     $echo->mock('GetPointAddress', sub {
         return {
-            Id => 12345,
+            Id => '12345',
             SharedRef => { Value => { anyType => '1000000002' } },
             PointType => 'PointAddress',
             PointAddressType => { Name => 'House' },
@@ -347,6 +377,7 @@ FixMyStreet::override_config {
         };
     });
     $echo->mock('GetServiceUnitsForObject', \&garden_waste_one_bin);
+    mock_CancelReservedSlotsForEvent($echo);
 
     subtest 'Garden type lookup' => sub {
         set_fixed_time('2021-03-09T17:00:00Z');
@@ -374,12 +405,12 @@ FixMyStreet::override_config {
         set_fixed_time('2021-04-05T17:00:00Z');
         $mech->get_ok('/waste/12345?1');
         $mech->content_contains('Subscribe to garden waste collection');
-        $mech->content_lacks('Modify your garden waste subscription');
+        $mech->content_lacks('Change your garden waste subscription');
         $mech->content_lacks('Your subscription is now overdue', "No overdue link if after expired");
         set_fixed_time('2021-03-05T17:00:00Z');
         $mech->get_ok('/waste/12345');
         $mech->content_contains('Your subscription is soon due for renewal', "due soon link if within 30 days of expiry");
-        $mech->content_lacks('Modify your garden waste subscription');
+        $mech->content_lacks('Change your garden waste subscription');
         $mech->get_ok('/waste/12345/garden_modify');
         is $mech->uri->path, '/waste/12345', 'link redirect to bin list if modify in renewal period';
         set_fixed_time('2021-02-28T17:00:00Z');
@@ -388,7 +419,7 @@ FixMyStreet::override_config {
         set_fixed_time('2021-02-27T17:00:00Z');
         $mech->get_ok('/waste/12345');
         $mech->content_lacks('Your subscription is soon due for renewal', "no renewal notice if over 30 days before expiry");
-        $mech->content_contains('Modify your garden waste subscription');
+        $mech->content_contains('Change your garden waste subscription');
         $mech->log_out_ok;
     };
 
@@ -492,7 +523,7 @@ FixMyStreet::override_config {
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $form->value("ACCEPTURL") );
 
-
+        is $form->value('ORDERID'), 'LBS-' . $new_report->id . '-' . '1000000002';
         is $form->value("AMOUNT"), 2000, 'correct amount used';
         check_extra_data_pre_confirm($new_report);
 
@@ -506,6 +537,12 @@ FixMyStreet::override_config {
 
         check_extra_data_post_confirm($new_report);
 
+        $mech->content_contains('We will aim to deliver your garden waste bin ');
+        $mech->content_like(qr#/waste/12345">Show upcoming#, "contains link to bin page");
+
+        # Someone double-clicked
+        $mech->get_ok("/waste/pay_complete/$report_id/$token?STATUS=9&PAYID=54321");
+        check_extra_data_post_confirm($new_report);
         $mech->content_contains('We will aim to deliver your garden waste bin ');
         $mech->content_like(qr#/waste/12345">Show upcoming#, "contains link to bin page");
 
@@ -644,8 +681,7 @@ FixMyStreet::override_config {
 
         my $new_report = FixMyStreet::DB->resultset('Problem')->search(
             { user_id => $user->id },
-            { order_by => { -desc => 'id' } },
-        )->first;
+        )->order_by('-id')->first;
 
         is $sent_params, undef, "no one off payment if reducing bin count";
         check_extra_data_pre_confirm($new_report, type => 'Amend', state => 'confirmed', action => 2);
@@ -823,8 +859,7 @@ FixMyStreet::override_config {
 
         my $new_report = FixMyStreet::DB->resultset('Problem')->search(
             { user_id => $staff_user->id },
-            { order_by => { -desc => 'id' } },
-        )->first;
+        )->order_by('-id')->first;
 
         is $new_report->category, 'Cancel Garden Subscription', 'correct category on report';
         is $new_report->get_extra_field_value('Subscription_End_Date'), '2021-03-09', 'cancel date set to current date';
@@ -844,11 +879,8 @@ FixMyStreet::override_config {
     my $report = FixMyStreet::DB->resultset("Problem")->search({
         category => 'Garden Subscription',
         title => 'Garden Subscription - New',
-        extra => { like => '%property_id,T5:value,I5:12345%' }
-    },
-    {
-        order_by => { -desc => 'id' }
-    })->first;
+        extra => { '@>' => encode_json({ "_fields" => [ { name => "property_id", value => '12345' } ] }) },
+    })->order_by('-id')->first;
 
     $echo->mock('GetServiceUnitsForObject', \&garden_waste_only_refuse_sacks);
 
@@ -918,7 +950,7 @@ FixMyStreet::override_config {
         } });
         $mech->content_contains('Test McTest');
         $mech->content_contains('£41.00');
-        $mech->content_contains('Sacks');
+        $mech->content_contains('1 sack subscription');
         $mech->submit_form_ok({ with_fields => { goto => 'sacks_details' } });
         $mech->content_contains('<span id="cost_pa">41.00');
         $mech->submit_form_ok({ with_fields => {
@@ -982,7 +1014,7 @@ FixMyStreet::override_config {
         set_fixed_time('2021-01-09T17:00:00Z');
         $mech->log_in_ok($user->email);
         $mech->get_ok('/waste/12345');
-        $mech->content_contains('Modify your garden waste subscription');
+        $mech->content_contains('Change your garden waste subscription');
         $mech->content_lacks('Order more garden sacks');
         $mech->get_ok('/waste/12345/garden_modify');
         $mech->content_lacks('<span id="pro_rata_cost">41.00');
@@ -1004,8 +1036,7 @@ FixMyStreet::override_config {
 
         my $new_report = FixMyStreet::DB->resultset('Problem')->search(
             { user_id => $staff_user->id },
-            { order_by => { -desc => 'id' } },
-        )->first;
+        )->order_by('-id')->first;
 
         is $new_report->category, 'Cancel Garden Subscription', 'correct category on report';
         is $new_report->get_extra_field_value('Subscription_End_Date'), '2021-03-09', 'cancel date set to current date';
@@ -1027,7 +1058,7 @@ FixMyStreet::override_config {
             email => 'test@example.net',
             payment_method => 'credit_card',
         } });
-        $mech->content_contains('Sacks');
+        $mech->content_contains('1 sack subscription');
         $mech->content_contains('41.00');
         $mech->submit_form_ok({ with_fields => { goto => 'sacks_choice' } });
         $mech->submit_form_ok({ with_fields => { container_choice => 'sack' } });
@@ -1052,7 +1083,7 @@ FixMyStreet::override_config {
         set_fixed_time('2021-01-09T17:00:00Z');
         $mech->log_in_ok($user->email);
         $mech->get_ok('/waste/12345');
-        $mech->content_lacks('Modify your garden waste subscription');
+        $mech->content_lacks('Change your garden waste subscription');
         $mech->content_lacks('Order more garden sacks');
         $mech->get_ok('/waste/12345/garden_modify');
         is $mech->uri->path, '/waste/12345', 'redirected';
@@ -1066,8 +1097,7 @@ FixMyStreet::override_config {
 
         my $new_report = FixMyStreet::DB->resultset('Problem')->search(
             { user_id => $staff_user->id },
-            { order_by => { -desc => 'id' } },
-        )->first;
+        )->order_by('-id')->first;
 
         is $new_report->category, 'Cancel Garden Subscription', 'correct category on report';
         is $new_report->get_extra_field_value('Subscription_End_Date'), '2021-03-09', 'cancel date set to current date';
@@ -1080,9 +1110,9 @@ FixMyStreet::override_config {
     $echo->mock('GetServiceUnitsForObject', \&garden_waste_one_bin);
 
     subtest 'check staff renewal' => sub {
+        $mech->log_out_ok;
+        $mech->log_in_ok($staff_user->email);
         foreach ({ email => 'a_user@example.net' }, { phone => '07700900002' }) {
-            $mech->log_out_ok;
-            $mech->log_in_ok($staff_user->email);
             $mech->get_ok('/waste/12345/garden_renew');
             $mech->submit_form_ok({ with_fields => {
                 name => 'a user',
@@ -1091,6 +1121,10 @@ FixMyStreet::override_config {
                 bins_wanted => 1,
                 payment_method => 'credit_card',
             }});
+            if (!$_->{email}) {
+                $mech->content_contains("Please provide an email");
+                next;
+            }
             $mech->content_contains('20.00');
 
             $mech->submit_form_ok({ with_fields => { tandc => 1 } });
@@ -1189,11 +1223,7 @@ FixMyStreet::override_config {
         $mech->submit_form_ok({ with_fields => { confirm => 1 } });
         $mech->content_like(qr#/waste/12345">Show upcoming#, "contains link to bin page");
 
-        my $new_report = FixMyStreet::DB->resultset('Problem')->search(
-            { },
-            { order_by => { -desc => 'id' } },
-        )->first;
-
+        my $new_report = FixMyStreet::DB->resultset('Problem')->order_by('-id')->first;
         is $new_report->category, 'Cancel Garden Subscription', 'correct category on report';
         is $new_report->get_extra_field_value('Subscription_End_Date'), '2021-03-09', 'cancel date set to current date';
         is $new_report->state, 'confirmed', 'report confirmed';
@@ -1210,7 +1240,7 @@ FixMyStreet::override_config {
         $mech->submit_form_ok({ form_number => 1 });
         $mech->submit_form_ok({ with_fields => { existing => 'no' } });
         $mech->content_like(qr#Total to pay now: £<span[^>]*>0.00#, "initial cost set to zero");
-        $mech->content_lacks('password', 'no password field');
+        $mech->content_lacks('name="password', 'no password field');
         $mech->submit_form_ok({ with_fields => {
                 current_bins => 0,
                 bins_wanted => 1,
@@ -1255,7 +1285,7 @@ FixMyStreet::override_config {
             name => 'Test McTest',
             email => 'test@example.net'
         } });
-        $mech->content_contains("Cheque reference field is required");
+        $mech->content_contains("Payment reference field is required");
         $mech->submit_form_ok({ with_fields => {
             cheque_reference => 'Cheque123',
         } });
@@ -1311,8 +1341,7 @@ FixMyStreet::override_config {
 
         my $new_report = FixMyStreet::DB->resultset('Problem')->search(
             { user_id => $staff_user->id },
-            { order_by => { -desc => 'id' } },
-        )->first;
+        )->order_by('-id')->first;
 
         is $new_report->category, 'Cancel Garden Subscription', 'correct category on report';
         is $new_report->get_extra_field_value('Subscription_End_Date'), '2021-03-09', 'cancel date set to current date';
@@ -1326,7 +1355,7 @@ FixMyStreet::override_config {
         $mech->log_out_ok;
 
         $mech->get_ok('/waste/12345/garden');
-        $mech->content_contains('A 12 month subscription is £20.00 per bin');
+        $mech->content_contains("It costs\n£20.00\nfor a 12-month");
         $mech->submit_form_ok({ form_number => 1 });
         $mech->submit_form_ok({ with_fields => { existing => 'no' } });
         $mech->content_contains('<span class="cost-pa">£20.00 per bin per year</span>');
@@ -1334,7 +1363,7 @@ FixMyStreet::override_config {
         set_fixed_time('2023-01-06T00:00:00Z'); # New pricing should be in effect
 
         $mech->get_ok('/waste/12345/garden');
-        $mech->content_contains('A 12 month subscription is £25.00 per bin');
+        $mech->content_contains("It costs\n£25.00\nfor a 12-month");
         $mech->submit_form_ok({ form_number => 1 });
         $mech->submit_form_ok({ with_fields => { existing => 'no' } });
         $mech->content_contains('<span class="cost-pa">£25.00 per bin per year</span>');
@@ -1429,6 +1458,13 @@ sub check_extra_data_post_confirm {
     is $report->get_extra_field_value('LastPayMethod'), $pay_method, 'correct echo payment method field';
     is $report->get_extra_field_value('PaymentCode'), '54321', 'correct echo payment reference field';
     is $report->get_extra_metadata('payment_reference'), '54321', 'correct payment reference on report';
+}
+
+sub mock_CancelReservedSlotsForEvent {
+    shift->mock( 'CancelReservedSlotsForEvent', sub {
+        my (undef, $guid) = @_;
+        ok $guid, 'non-nil GUID passed to CancelReservedSlotsForEvent';
+    } );
 }
 
 done_testing;

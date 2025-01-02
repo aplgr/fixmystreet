@@ -1,6 +1,5 @@
 [% IF c.req.uri.path == '/' %]
-    <a href="https://www.mysociety.org/about/anniversary" id="mysociety-badge" aria-label="Visit mySociety 20 years anniversary">
-        [% INSERT badge_mysociety_mobile.svg %]
+    <a href="https://www.mysociety.org/" id="mysociety-badge" aria-label="A service from mySociety">
         [% INSERT badge_mysociety_desktop.svg %]
     </a>
 [% END %]
@@ -12,4 +11,18 @@
         <span class="site-logo__fallback"></span>
     [% END %]
 [% END %]</a>
+
+<a id="lang-switcher" href="//[%
+    IF lang_code == 'en-gb';
+        IF c.cobrand.base_host.match('www');
+            c.cobrand.base_host.replace('www\.', 'cy.');
+        ELSE;
+            'cy.' _ c.cobrand.base_host;
+        END;
+    ELSE;
+        c.cobrand.base_host;
+    END;
+%][% c.req.uri.path_query %]">[% IF lang_code == 'en-gb' %]Cymraeg[% ELSE %]English[% END %]
+</a>
+
 <a href="[% c.cobrand.base_url IF admin %]/" id="report-cta" title="[%- loc('Report a problem') -%]">[%- loc('Report') -%]</a>

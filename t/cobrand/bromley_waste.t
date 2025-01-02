@@ -1,4 +1,5 @@
 use CGI::Simple;
+use JSON::MaybeXS;
 use Test::MockModule;
 use Test::MockTime qw(:all);
 use Test::Warn;
@@ -20,8 +21,7 @@ END { FixMyStreet::App->log->enable('info'); }
 my $user = $mech->create_user_ok( 'bromley@example.com', name => 'Bromley' );
 my $body = $mech->create_body_ok( 2482, 'Bromley Council', {
     can_be_devolved => 1, send_extended_statuses => 1, comment_user => $user,
-    send_method => 'Open311', endpoint => 'http://endpoint.example.com', jurisdiction => 'FMS', api_key => 'test', send_comments => 1
-}, {
+    send_method => 'Open311', endpoint => 'http://endpoint.example.com', jurisdiction => 'FMS', api_key => 'test', send_comments => 1,
     cobrand => 'bromley'
 });
 $mech->create_user_ok('superuser@example.com', is_superuser => 1, name => "Super User");
@@ -30,7 +30,15 @@ my $role = FixMyStreet::DB->resultset("Role")->create({
     body => $body, name => 'Role A', permissions => ['moderate', 'user_edit', 'report_mark_private', 'report_inspect', 'contribute_as_body'] });
 $staffuser->add_to_roles($role);
 
-$mech->create_contact_ok(
+my $pothole = $mech->create_contact_ok(
+    body => $body,
+    category => 'Pothole',
+    email => 'pothole',
+    send_method => 'Open311',
+    endpoint => 'pothole-endpoint',
+);
+
+my $missed = $mech->create_contact_ok(
     body => $body,
     category => 'Report missed collection',
     email => 'missed',
@@ -55,6 +63,33 @@ my @reports = $mech->create_problems_for_body( 1, $body->id, 'Test', {
     },
 });
 my $report = $reports[0];
+
+
+subtest 'check footer is powered by SocietyWorks' => sub {
+
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => 'bromley',
+        COBRAND_FEATURES => {
+            waste => { bromley => 1 },
+        }
+    }, sub {
+        $mech->get_ok('/waste');
+        $mech->content_contains('href="https://www.societyworks.org/services/waste/">SocietyWorks', "Footer links to SocietyWorks when bulky waste not enabled");
+    };
+
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => 'bromley',
+        COBRAND_FEATURES => {
+            waste => { bromley => 1 },
+            waste_features => {
+                bromley => { bulky_enabled => 1 }
+            }
+        }
+    }, sub {
+        $mech->get_ok('/waste');
+        $mech->content_contains('href="https://www.societyworks.org/services/waste/">SocietyWorks', "Footer links to SocietyWorks when bulky waste enabled");
+    };
+};
 
 subtest 'test waste duplicate' => sub {
     my $sender = FixMyStreet::SendReport::Open311->new(
@@ -121,6 +156,11 @@ subtest 'Updates on waste reports still have munged params' => sub {
 
         is $report->comments->count, 1, 'comment was added';
         my $comment = $report->comments->first;
+        $comment->set_extra_metadata(
+            'fms_extra_resolution_code' => 207,
+            'fms_extra_event_status' => 'Rejected',
+        );
+        $comment->update;
 
         $report->update({ cobrand_data => 'waste' });
         my $updates = Open311::PostServiceRequestUpdates->new();
@@ -133,6 +173,8 @@ subtest 'Updates on waste reports still have munged params' => sub {
         is $c->param('service_request_id_ext'), $report->id;
         is $c->param('public_anonymity_required'), 'FALSE';
         is $c->param('email_alerts_requested'), undef;
+        is $c->param('attribute[resolution_code]'), 207;
+        is $c->param('attribute[event_status]'), 'Rejected';
 
         $report->update({ cobrand_data => '' });
         $mech->log_out_ok;
@@ -148,7 +190,7 @@ $report->update({ category => 'Other' });
     }, sub {
         $mech->follow_link_ok({ text_regex => qr/Back to all reports/i });
     };
-    $mech->content_like(qr{<a title="Test Test[^>]*href="/[^>]*><img[^>]*yellow});
+    $mech->content_like(qr{<a title="Test Test[^>]*href="/[^>]*><img[^>]*grey});
     $mech->content_lacks('Report missed collection');
 };
 
@@ -207,7 +249,8 @@ FixMyStreet::override_config {
         set_fixed_time('2020-05-21T12:00:00Z'); # After sample container mix
         $mech->get_ok('/waste/12345');
         $mech->content_like(qr/Mixed Recycling.*?Last collection<\/dt>\s*<dd[^>]*>\s*Wednesday, 20th May\s+\(this collection was adjusted/s);
-        $mech->content_contains('A missed collection cannot be reported, please see the last collection status above.');
+        $mech->content_contains('A missed collection cannot be reported;');
+        $mech->content_contains('please see the last collection status above.');
         $mech->content_lacks('Report a mixed recycling ');
         restore_time();
     };
@@ -242,6 +285,7 @@ FixMyStreet::override_config {
             title => 'Wrong bin (refuse)',
             text => 'We could not collect your refuse waste as it was not correctly presented.',
             resolution_code => 187,
+            'contacts[' . $missed->id . ']' => 1,
             task_type => 3216,
             task_state => 'Completed',
         } });
@@ -264,6 +308,26 @@ FixMyStreet::override_config {
         $mech->get_ok('/waste/12345');
         $mech->content_lacks('Report a non-recyclable refuse collection');
         restore_time();
+    };
+
+    subtest 'test not using different backend template' => sub {
+        my $templates = FixMyStreet::DB->resultset("ResponseTemplate")->search({ title => [ 'Wrong bin (generic)', 'Wrong bin (refuse)' ] });
+        my @templates = $templates->all;
+        @templates = map { $_->id } @templates;
+        FixMyStreet::DB->resultset("ContactResponseTemplate")->search({ response_template_id => \@templates })->delete;
+        $templates->delete;
+        $mech->log_in_ok('superuser@example.com');
+        $mech->get_ok('/admin/templates/' . $body->id . '/new');
+        $mech->submit_form_ok({ with_fields => {
+            title => 'Not repaired',
+            text => 'We have decided not to repair this at this time, but will monitor.',
+            resolution_code => 187,
+            'contacts[' . $pothole->id . ']' => 1,
+        } });
+        $mech->log_out_ok;
+        $mech->get_ok('/waste/12345');
+        $mech->content_contains('May, at 10:00am');
+        $mech->content_lacks('We have decided not to repair');
     };
 
     subtest 'test reporting with an existing closed event' => sub {
@@ -320,7 +384,99 @@ FixMyStreet::override_config {
         $mech->content_contains('You have a pending garden subscription');
         $mech->content_lacks('Subscribe to Green Garden Waste');
     };
+};
 
+subtest 'Checking correct renewal prices' => sub {
+    my $echo = Test::MockModule->new('Integrations::Echo');
+    $echo->mock('GetServiceUnitsForObject', sub {
+        return [
+            {
+                Id => 1005,
+                ServiceId => 545,
+                ServiceName => 'Garden waste collection',
+                ServiceTasks => { ServiceTask => {
+                    Id => 405,
+                    Data => { ExtensibleDatum => [ {
+                        DatatypeName => 'LBB - GW Container',
+                        ChildData => { ExtensibleDatum => [ {
+                            DatatypeName => 'Quantity',
+                            Value => 1,
+                        }, {
+                            DatatypeName => 'Container',
+                            Value => 44,
+                        } ] },
+                    } ] },
+                    ServiceTaskSchedules => { ServiceTaskSchedule => [ {
+                        ScheduleDescription => 'every other Monday',
+                        StartDate => { DateTime => '2021-06-14T23:00:00Z' },
+                        EndDate => { DateTime => '2021-07-14T23:00:00Z' },
+                        NextInstance => {
+                            CurrentScheduledDate => { DateTime => '2021-07-05T06:00:00Z' },
+                            OriginalScheduledDate => { DateTime => '2021-07-04T23:00:00' },
+                        },
+                        LastInstance => {
+                            OriginalScheduledDate => { DateTime => '2021-06-20T23:00:00Z' },
+                            CurrentScheduledDate => { DateTime => '2021-06-21T06:00:00Z' },
+                            Ref => { Value => { anyType => [ 567, 890 ] } },
+                        }
+                    }, {
+                        StartDate => { DateTime => '2020-11-01T00:00:00Z' },
+                        EndDate => { DateTime => '2021-06-15T22:59:59Z' },
+                        LastInstance => {
+                            OriginalScheduledDate => { DateTime => '2021-06-20T23:00:00Z' },
+                            CurrentScheduledDate => { DateTime => '2021-06-21T06:00:00Z' },
+                            Ref => { Value => { anyType => [ 567, 890 ] } },
+                        },
+                        NextInstance => {
+                            CurrentScheduledDate => { DateTime => '2021-07-05T06:00:00Z' },
+                            OriginalScheduledDate => { DateTime => '2021-07-04T23:00:00' },
+                        },
+                    } ] },
+                } },
+            }
+        ];
+    });
+    set_fixed_time('2021-06-10T12:00:00Z');
+
+    for my $test (
+    {
+        config => { start_date => '2020-01-29 00:00'},
+        data => {
+            renewal_text => '£20.00 per bin per year',
+            test_text => 'Renewal price picks up higher cost when renewal date after price rise day',
+        },
+    },
+    {
+        config => { start_date => '2021-07-14 00:00'},
+        data => {
+            renewal_text => '£20.00 per bin per year',
+            test_text => 'Renewal price picks up higher cost when renewal date on price rise day',
+        },
+    },
+    {
+        config => { start_date => '2021-07-15 00:00'},
+        data => {
+            renewal_text => '£10.00 per bin per year',
+            test_text => 'Renewal price picks up lower cost when renewal date before price rise day',
+        },
+    }) {
+        FixMyStreet::override_config {
+            ALLOWED_COBRANDS => 'bromley',
+            COBRAND_FEATURES => {
+                payment_gateway => { bromley => { ggw_cost => [
+                    { start_date => '2019-02-27 00:00', cost => 1000 },
+                    { start_date => $test->{config}->{start_date}, cost => 2000 },
+                    ]}},
+                echo => { bromley => { sample_data => 1 } },
+                waste => { bromley => 1 }
+            },
+        }, sub {
+            subtest $test->{data}{test_text} => sub {
+                $mech->get_ok('/waste/12345/garden_renew');
+                $mech->content_contains($test->{data}->{renewal_text}, $test->{data}->{test_text});
+            };
+        };
+    }
 };
 
 subtest 'test waste max-per-day' => sub {
@@ -370,10 +526,10 @@ subtest 'updating of waste reports' => sub {
         if ($method eq 'GetEvent') {
             my ($key, $type, $value) = ${$args[3]->value}->value;
             my $external_id = ${$value->value}->value->value;
-            my ($waste, $event_state_id, $resolution_code) = split /-/, $external_id;
+            my ($waste, $event_state_id, $resolution_code, $event_type_id) = split /-/, $external_id;
             return SOAP::Result->new(result => {
                 EventStateId => $event_state_id,
-                EventTypeId => '2104',
+                EventTypeId => $event_type_id || '2104',
                 LastUpdatedDate => { OffsetMinutes => 60, DateTime => '2020-06-24T14:00:00Z' },
                 ResolutionCodeId => $resolution_code,
             });
@@ -399,6 +555,7 @@ subtest 'updating of waste reports' => sub {
                         { ResolutionCodeId => 206, Name => 'Out of Time' },
                         { ResolutionCodeId => 207, Name => 'Duplicate' },
                       ] } },
+                    { CoreState => 'Closed', Name => 'Closed', Id => 15007 },
                 ] } },
             });
         } else {
@@ -406,6 +563,7 @@ subtest 'updating of waste reports' => sub {
         }
     });
 
+    my $comment_count = 0;
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => 'bromley',
         COBRAND_FEATURES => {
@@ -431,33 +589,59 @@ subtest 'updating of waste reports' => sub {
             $cobrand->waste_fetch_events({ verbose => 1 });
         } qr/Fetching data for report/;
         $report->discard_changes;
-        is $report->comments->count, 0, 'No new update';
+        is $report->comments->count, $comment_count, 'No new update';
         is $report->state, 'confirmed', 'No state change';
 
+        # Test general enquiry closed
+        $report->update({ external_id => 'waste-15007--2148' });
+        stdout_like {
+            $cobrand->waste_fetch_events({ verbose => 1 });
+        } qr/Fetching data for report/;
+        $report->discard_changes;
+        is $report->comments->count, ++$comment_count, 'No new update';
+        is $report->state, 'closed', 'State change to fixed';
+        $report->update({ state => 'confirmed' }); # Reset back
+
         $report->update({ external_id => 'waste-15003-' });
+        stdout_like {
+            $cobrand->waste_fetch_events({ verbose => 1 });
+        } qr/Fetching data for report/;
+        $report->discard_changes;
+        is $report->comments->count, $comment_count, 'No new update';
+        is $report->state, 'confirmed', 'No state change';
+
+        $report->update({ external_id => 'waste-15003-123' });
         stdout_like {
             $cobrand->waste_fetch_events({ verbose => 1 });
         } qr/Updating report to state action scheduled, Allocated to Crew/;
         $report->discard_changes;
-        is $report->comments->count, 1, 'A new update';
-        my $update = $report->comments->first;
+        is $report->comments->count, ++$comment_count, 'A new update';
+        my $update = FixMyStreet::DB->resultset('Comment')->order_by('-id')->first;
         is $update->text, 'This has been allocated';
         is $report->state, 'action scheduled', 'A state change';
 
-        $report->update({ external_id => 'waste-15003-' });
+        $report->update({ external_id => 'waste-15003-123' });
         stdout_like {
             $cobrand->waste_fetch_events({ verbose => 1 });
         } qr/Latest update matches fetched state/;
         $report->discard_changes;
-        is $report->comments->count, 1, 'No new update';
+        is $report->comments->count, $comment_count, 'No new update';
         is $report->state, 'action scheduled', 'State unchanged';
 
-        $report->update({ external_id => 'waste-15004-201' });
+        $report->update({ external_id => 'waste-15004-' });
         stdout_like {
             $cobrand->waste_fetch_events({ verbose => 1 });
         } qr/Updating report to state fixed - council, Completed/;
         $report->discard_changes;
-        is $report->comments->count, 2, 'A new update';
+        is $report->comments->count, ++$comment_count, 'A new update';
+        is $report->state, 'fixed - council', 'Changed to fixed';
+
+        $report->update({ state => 'action scheduled', external_id => 'waste-15004-201' });
+        stdout_like {
+            $cobrand->waste_fetch_events({ verbose => 1 });
+        } qr/Updating report to state fixed - council, Completed/;
+        $report->discard_changes;
+        is $report->comments->count, ++$comment_count, 'A new update';
         is $report->state, 'fixed - council', 'Changed to fixed';
 
         $reports[1]->update({ state => 'fixed - council' });
@@ -470,7 +654,7 @@ subtest 'updating of waste reports' => sub {
             $cobrand->waste_fetch_events({ verbose => 1 });
         } qr/Updating report to state unable to fix, Inclement Weather/;
         $report->discard_changes;
-        is $report->comments->count, 3, 'A new update';
+        is $report->comments->count, ++$comment_count, 'A new update';
         is $report->state, 'unable to fix', 'A state change';
     };
 
@@ -502,137 +686,132 @@ subtest 'updating of waste reports' => sub {
         $mech->post('/waste/echo', Content_Type => 'text/xml', Content => $in);
         is $mech->res->code, 400, 'Bad auth';
 
-        $in = <<EOF;
-<?xml version="1.0" encoding="UTF-8"?>
-<Envelope>
-  <Header>
-    <Action>action</Action>
-    <Security><UsernameToken><Username>un</Username><Password>password</Password></UsernameToken></Security>
-  </Header>
-  <Body>
-    <NotifyEventUpdated>
-      <event>
-        <Guid>waste-15005-XXX</Guid>
-        <EventTypeId>2104</EventTypeId>
-        <EventStateId>15006</EventStateId>
-        <ResolutionCodeId>207</ResolutionCodeId>
-      </event>
-    </NotifyEventUpdated>
-  </Body>
-</Envelope>
-EOF
-
+        $in = $mech->echo_notify_xml('waste-15005-XXX', 2104, 15006, 207);
         $mech->post('/waste/echo', Content_Type => 'text/xml', Content => $in);
         is $mech->res->code, 200, 'OK response, even though event does not exist';
-        is $report->comments->count, 3, 'No new update';
+        is $report->comments->count, $comment_count, 'No new update';
 
-        $in = <<EOF;
-<?xml version="1.0" encoding="UTF-8"?>
-<Envelope>
-  <Header>
-    <Action>action</Action>
-    <Security><UsernameToken><Username>un</Username><Password>password</Password></UsernameToken></Security>
-  </Header>
-  <Body>
-    <NotifyEventUpdated>
-      <event>
-        <Guid>waste-15005-205</Guid>
-        <ClientReference>FMS-%%%</ClientReference>
-        <EventTypeId>2104</EventTypeId>
-        <EventStateId>15006</EventStateId>
-        <ResolutionCodeId>207</ResolutionCodeId>
-      </event>
-    </NotifyEventUpdated>
-  </Body>
-</Envelope>
-EOF
+        $in = $mech->echo_notify_xml('waste-15005-205', 2104, 15006, 207, 'FMS-%%%');
         my $report_id = $report->id;
         $in =~ s/%%%/$report_id/;
 
         $mech->post('/waste/echo', Content_Type => 'text/xml', Content => $in);
         #$report->update({ external_id => 'waste-15005-205', state => 'confirmed' });
-        is $report->comments->count, 4, 'A new update';
+        is $report->comments->count, ++$comment_count, 'A new update';
         $report->discard_changes;
         is $report->state, 'closed', 'A state change';
 
+        my $comment = FixMyStreet::DB->resultset('Comment')->search(undef, { order_by => { -desc => 'id' } })->first;
+        is $comment->get_extra_metadata('fms_extra_event_status'), 'Rejected';
+        is $comment->get_extra_metadata('fms_extra_resolution_code'), 'Duplicate';
         FixMyStreet::App->log->enable('info');
     };
 };
 
-subtest 'check pro-rata calculation' => sub {
-    FixMyStreet::override_config {
-        ALLOWED_COBRANDS => 'bromley',
-        COBRAND_FEATURES => {
-            payment_gateway => {
-                bromley => {
-                    ggw_cost => 2000,
-                    pro_rata_weekly => 86,
-                    pro_rata_minimum => 1586,
-                }
-            }
+for my $test (
+    {
+        config => {
+            ggw_cost => 2000,
+            pro_rata_weekly => 86,
+            pro_rata_minimum => 1586,
         },
-    }, sub {
-        my $c = FixMyStreet::Cobrand::Bromley->new;
+        data => {
+            four_days => '1586',
+            one_week => '1586',
+            two_weeks => '1672',
+            two_and_a_half_weeks => '1672',
+            twenty_five_weeks => '3650',
+            fifty_one_weeks => '5886',
+        }
+    },
+    {
+        config => {
+            ggw_cost => 2000,
+            pro_rata_weekly => [{ start_date => '2020-05-11 00:00', cost => '86'}, {start_date => '2021-01-01 00:00', cost => '107.7'}, {start_date => '2024-05-11 00:00', cost => '100'}],
+            pro_rata_minimum => [{ start_date => '2020-05-11 00:00', cost => '1586'}, {start_date => '2021-01-01 00:00', cost => '1500'}, {start_date => '2024-05-11 00:00', cost => '100'}],
+        },
+        data => {
+            four_days => '1500',
+            one_week => '1500',
+            two_weeks => '1608',
+            two_and_a_half_weeks => '1608',
+            twenty_five_weeks => '4085',
+            fifty_one_weeks => '6885',
+        }
+    }
+) {
 
-        my $start = DateTime->new(
-            year => 2021,
-            month => 02,
-            day => 19
-        );
+    subtest 'check pro-rata calculation' => sub {
+        FixMyStreet::override_config {
+            ALLOWED_COBRANDS => 'bromley',
+            COBRAND_FEATURES => {
+                payment_gateway => {
+                    bromley => $test->{config}
+                }
+            },
+        }, sub {
+            my $c = FixMyStreet::Cobrand::Bromley->new;
 
-        for my $test (
-            {
+            my $start = DateTime->new(
                 year => 2021,
-                month => 2,
-                day => 23,
-                expected => 1586,
-                desc => '4 days remaining',
-            },
-            {
-                year => 2021,
-                month => 2,
-                day => 26,
-                expected => 1586,
-                desc => 'one week remaining',
-            },
-            {
-                year => 2021,
-                month => 3,
-                day => 5,
-                expected => 1672,
-                desc => 'two weeks remaining',
-            },
-            {
-                year => 2021,
-                month => 3,
-                day => 8,
-                expected => 1672,
-                desc => 'two and a half weeks remaining',
-            },
-            {
-                year => 2021,
-                month => 8,
-                day => 19,
-                expected => 3650,
-                desc => '25 weeks remaining',
-            },
-            {
-                year => 2022,
-                month => 2,
-                day => 14,
-                expected => 5886,
-                desc => '51 weeks remaining',
-            },
-        ) {
-
-            my $end = DateTime->new(
-                year => $test->{year},
-                month => $test->{month},
-                day => $test->{day},
+                month => 02,
+                day => 19
             );
 
-            is $c->waste_get_pro_rata_bin_cost($end, $start), $test->{expected}, $test->{desc};
-        }
+            for my $test (
+                {
+                    year => 2021,
+                    month => 2,
+                    day => 23,
+                    expected => $test->{data}->{four_days},
+                    desc => '4 days remaining',
+                },
+                {
+                    year => 2021,
+                    month => 2,
+                    day => 26,
+                    expected => $test->{data}->{one_week},
+                    desc => 'one week remaining',
+                },
+                {
+                    year => 2021,
+                    month => 3,
+                    day => 5,
+                    expected => $test->{data}->{two_weeks},
+                    desc => 'two weeks remaining',
+                },
+                {
+                    year => 2021,
+                    month => 3,
+                    day => 8,
+                    expected => $test->{data}->{two_and_a_half_weeks},
+                    desc => 'two and a half weeks remaining',
+                },
+                {
+                    year => 2021,
+                    month => 8,
+                    day => 19,
+                    expected => $test->{data}->{twenty_five_weeks},
+                    desc => '25 weeks remaining',
+                },
+                {
+                    year => 2022,
+                    month => 2,
+                    day => 14,
+                    expected => $test->{data}->{fifty_one_weeks},
+                    desc => '51 weeks remaining',
+                },
+            ) {
+
+                my $end = DateTime->new(
+                    year => $test->{year},
+                    month => $test->{month},
+                    day => $test->{day},
+                );
+
+                is $c->waste_get_pro_rata_bin_cost($end, $start), $test->{expected}, $test->{desc};
+            }
+        };
     };
 };
 
@@ -1241,17 +1420,15 @@ subtest 'check direct debit reconcilliation' => sub {
 
     my $warnings = [
         "\n",
-        "looking at payment GGW554321\n",
-        "payment date: 16/03/2021\n",
+        "looking at payment GGW554321 for £10 on 16/03/2021\n",
         "category: Garden Subscription (1)\n",
         "is a new/ad hoc\n",
         "no matching record found for Garden Subscription payment with id GGW554321\n",
         "done looking at payment GGW554321\n",
         "\n",
-        "looking at payment $hidden_ref\n",
-        "payment date: 16/03/2021\n",
+        "looking at payment $hidden_ref for £10 on 16/03/2021\n",
         "category: Garden Subscription (1)\n",
-        "extra query is %payerReference,T" . length($hidden_ref) . ":$hidden_ref%\n",
+        "extra query is {payerReference: $hidden_ref\n",
         "is a new/ad hoc\n",
         "looking at potential match " . $hidden->id . "\n",
         "potential match is a dd payment\n",
@@ -1260,26 +1437,23 @@ subtest 'check direct debit reconcilliation' => sub {
         "no matching record found for Garden Subscription payment with id $hidden_ref\n",
         "done looking at payment $hidden_ref\n",
         "\n",
-        "looking at payment $renewal_nothing_in_echo_ref\n",
-        "payment date: 16/03/2021\n",
+        "looking at payment $renewal_nothing_in_echo_ref for £10 on 16/03/2021\n",
         "category: Garden Subscription (2)\n",
-        "extra query is %payerReference,T" . length($renewal_nothing_in_echo_ref) . ":$renewal_nothing_in_echo_ref%\n",
+        "extra query is {payerReference: $renewal_nothing_in_echo_ref\n",
         "is a renewal\n",
         "looking at potential match " . $renewal_nothing_in_echo->id . " with state confirmed\n",
         "is a matching new report\n",
         "no matching service to renew for $renewal_nothing_in_echo_ref\n",
         "\n",
-        "looking at payment GGW854324\n",
-        "payment date: 16/03/2021\n",
+        "looking at payment GGW854324 for £10 on 16/03/2021\n",
         "category: Garden Subscription (2)\n",
         "is a renewal\n",
         "no matching record found for Garden Subscription payment with id GGW854324\n",
         "done looking at payment GGW854324\n",
         "\n",
-        "looking at payment $ad_hoc_skipped_ref\n",
-        "payment date: 16/03/2021\n",
+        "looking at payment $ad_hoc_skipped_ref for £10 on 16/03/2021\n",
         "category: Garden Subscription (1)\n",
-        "extra query is %payerReference,T" . length($ad_hoc_skipped_ref) . ":$ad_hoc_skipped_ref%\n",
+        "extra query is {payerReference: $ad_hoc_skipped_ref\n",
         "is a new/ad hoc\n",
         "looking at potential match " . $ad_hoc_skipped->id . "\n",
         "potential match is a dd payment\n",
@@ -1326,12 +1500,9 @@ subtest 'check direct debit reconcilliation' => sub {
     is $renewal_from_cc_sub->get_extra_field_value('LastPayMethod'), 3, 'correct echo payment method field';
 
     my $subsequent_renewal_from_cc_sub = FixMyStreet::DB->resultset('Problem')->search({
-            extra => { like => '%uprn,T5:value,I7:3654321%' }
+            extra => { '@>' => encode_json({ _fields => [ { name => "uprn", value => "3654321" } ] }) },
         },
-        {
-            order_by => { -desc => 'id' }
-        }
-    );
+    )->order_by('-id');
     is $subsequent_renewal_from_cc_sub->count, 2, "two record for subsequent renewal property";
     $subsequent_renewal_from_cc_sub = $subsequent_renewal_from_cc_sub->first;
     is $subsequent_renewal_from_cc_sub->state, 'confirmed', "Renewal report confirmed";
@@ -1364,12 +1535,9 @@ subtest 'check direct debit reconcilliation' => sub {
     is $cancel_nothing_in_echo->state, 'hidden', 'hide already cancelled report';
 
     my $renewal = FixMyStreet::DB->resultset('Problem')->search({
-            extra => { like => '%uprn,T5:value,I6:654322%' }
+            extra => { '@>' => encode_json({ _fields => [ { name => "uprn", value => "654322" } ] }) },
         },
-        {
-            order_by => { -desc => 'id' }
-        }
-    );
+    )->order_by('-id');
 
     is $renewal->count, 2, "two records for renewal property";
     my $p = $renewal->first;
@@ -1395,34 +1563,27 @@ subtest 'check direct debit reconcilliation' => sub {
     $p->update;
 
     my $renewal_too_recent = FixMyStreet::DB->resultset('Problem')->search({
-            extra => { like => '%uprn,T5:value,I6:654329%' }
+            extra => { '@>' => encode_json({ _fields => [ { name => "uprn", value => "654329" } ] }) },
         },
-        {
-            order_by => { -desc => 'id' }
-        }
-    );
+    )->order_by('-id');
     is $renewal_too_recent->count, 0, "ignore payments less that three days old";
 
-    my $cancel = FixMyStreet::DB->resultset('Problem')->search({ extra => { like => '%uprn,T5:value,I6:654323%' } }, { order_by => { -desc => 'id' } });
+    my $cancel = FixMyStreet::DB->resultset('Problem')->search({
+        extra => { '@>' => encode_json({ _fields => [ { name => "uprn", value => "654323" } ] }) },
+    })->order_by('-id');
     is $cancel->count, 1, "one record for cancel property";
     is $cancel->first->id, $sub_for_cancel->id, "only record is the original one, no cancellation report created";
 
     my $processed = FixMyStreet::DB->resultset('Problem')->search({
-            extra => { like => '%uprn,T5:value,I6:654324%' }
+            extra => { '@>' => encode_json({ _fields => [ { name => "uprn", value => "654324" } ] }) },
         },
-        {
-            order_by => { -desc => 'id' }
-        }
-    );
+    )->order_by('-id');
     is $processed->count, 2, "two records for processed renewal property";
 
     my $ad_hoc_processed_rs = FixMyStreet::DB->resultset('Problem')->search({
-            extra => { like => '%uprn,T5:value,I6:654326%' }
+            extra => { '@>' => encode_json({ _fields => [ { name => "uprn", value => "654326" } ] }) },
         },
-        {
-            order_by => { -desc => 'id' }
-        }
-    );
+    )->order_by('-id');
     is $ad_hoc_processed_rs->count, 1, "one records for processed ad hoc property";
 
     $unprocessed_cancel->discard_changes;
@@ -1442,6 +1603,40 @@ subtest 'check direct debit reconcilliation' => sub {
     $ad_hoc_skipped->discard_changes;
     is $ad_hoc_skipped->state, 'unconfirmed', "ad hoc report not confirmed on second run";
 
+    warnings_are {
+        $c->waste_reconcile_direct_debits({ reference => $hidden_ref });
+    } [
+        "\n",
+        "looking at payment $hidden_ref for £10 on 16/03/2021\n",
+        "category: Garden Subscription (1)\n",
+        "extra query is {payerReference: $hidden_ref\n",
+        "is a new/ad hoc\n",
+        "looking at potential match " . $hidden->id . "\n",
+        "potential match is a dd payment\n",
+        "potential match type is 1\n",
+        "found matching report " . $hidden->id . " with state hidden\n",
+        "no matching record found for Garden Subscription payment with id $hidden_ref\n",
+        "done looking at payment $hidden_ref\n",
+    ], "warns if given reference";
+
+    $hidden->update({ state => 'fixed - council' });
+    warnings_are {
+        $c->waste_reconcile_direct_debits({ reference => $hidden_ref, force_renewal => 1 });
+    } [
+        "\n",
+        "looking at payment $hidden_ref for £10 on 16/03/2021\n",
+        "category: Garden Subscription (1)\n",
+        "Overriding type 1 to renew\n",
+        "extra query is {payerReference: $hidden_ref\n",
+        "is a renewal\n",
+        "looking at potential match " . $hidden->id . " with state fixed - council\n",
+        "is a matching new report\n",
+        "no matching service to renew for $hidden_ref\n",
+    ], "gets past the first stage if forced renewal";
+
+    stdout_like {
+        $c->waste_reconcile_direct_debits({ reference => $renewal_nothing_in_echo_ref, force_when_missing => 1, verbose => 1 });
+    } qr/looking at payment $renewal_nothing_in_echo_ref for £10 on 16\/03\/2021.*?category: Garden Subscription \(2\).*?is a renewal.*?looking at potential match @{[$renewal_nothing_in_echo->id]}.*?is a matching new report.*?created new confirmed report.*?done looking at payment/s, "creates a renewal if forced to";
 };
 
 };

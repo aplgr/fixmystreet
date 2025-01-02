@@ -63,7 +63,7 @@ sub geocoded_string_check {
 sub find_closest {
     my ( $self, $problem ) = @_;
     $problem = $problem->{problem} if ref $problem eq 'HASH';
-    return FixMyStreet::Geocode::OSM::closest_road_text( $self, $problem->latitude, $problem->longitude );
+    return FixMyStreet::Geocode::OSM->closest_road_text( $self, $problem->latitude, $problem->longitude );
 }
 
 # Used by send-reports, calling find_closest, calling OSM geocoding
@@ -152,19 +152,19 @@ sub council_rss_alert_options {
         push @options,
           {
             type => 'area',
-            id   => sprintf( 'area:%s:%s', $kommune->{id}, $id_kommune_name ),
+            id   => sprintf( 'area:%s', $kommune->{id} ),
             rss_text =>
               sprintf( _('RSS feed of %s'), $kommune->{name} ),
             text => $kommune->{name},
-            uri => $c->uri_for( '/rss/area', $short_kommune_name ),
+            uri => $c->uri_for( '/rss/area', $kommune->{id} ),
           },
           {
             type => 'area',
-            id   => sprintf( 'area:%s:%s', $fylke->{id}, $id_fylke_name ),
+            id   => sprintf( 'area:%s', $fylke->{id} ),
             rss_text =>
               sprintf( _('RSS feed of %s'), $fylke->{name} ),
             text => $fylke->{name},
-            uri => $c->uri_for( '/rss/area', $short_fylke_name ),
+            uri => $c->uri_for( '/rss/area', $fylke->{id} ),
           };
 
         push @reported_to_options,

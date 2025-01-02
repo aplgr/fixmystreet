@@ -1,9 +1,12 @@
 use FixMyStreet::TestMech;
+use FixMyStreet::Script::CSVExport;
 use FixMyStreet::Script::Reports;
+use File::Temp 'tempdir';
 use Test::MockModule;
 use CGI::Simple;
 use Test::LongString;
 use Open311::PostServiceRequestUpdates;
+use t::Mock::Nominatim;
 
 my $mock = Test::MockModule->new('FixMyStreet::Cobrand::Peterborough');
 $mock->mock('_fetch_features', sub {
@@ -18,6 +21,9 @@ $mock->mock('_fetch_features', sub {
         # adopted roads
         } elsif ( $x == 552721 && $args->{url} =~ m{7/query} ) {
             return [ { geometry => { type => 'Point' } } ];
+        } elsif ( $x == 551973 && $args->{url} =~ m{7/query} ) {
+            # site_code lookup test
+            return [ { geometry => { type => 'Polygon', coordinates => [ [ [ 551975, 298244 ], [ 551975, 298244 ] ] ] }, properties => { USRN => "ROAD" } } ];
         }
         return [];
     }
@@ -33,8 +39,9 @@ my $params = {
     endpoint => 'endpoint',
     jurisdiction => 'home',
     can_be_devolved => 1,
+    cobrand => 'peterborough',
 };
-my $peterborough = $mech->create_body_ok(2566, 'Peterborough City Council', $params, { cobrand => 'peterborough' });
+my $peterborough = $mech->create_body_ok(2566, 'Peterborough City Council', $params);
 my $contact = $mech->create_contact_ok(email => 'FLY', body_id => $peterborough->id, category => 'General fly tipping');
 my $user = $mech->create_user_ok('peterborough@example.org', name => 'Council User', from_body => $peterborough);
 $peterborough->update( { comment_user_id => $user->id } );
@@ -56,7 +63,7 @@ subtest 'open311 request handling', sub {
                 { description => 'Tree code', code => 'colour', required => 'True', automated => 'hidden_field' },
             ] },
         );
-        my ($p) = $mech->create_problems_for_body(1, $peterborough->id, 'Title', { category => 'Trees', latitude => 52.5608, longitude => 0.2405, cobrand => 'peterborough' });
+        my ($p) = $mech->create_problems_for_body(1, $peterborough->id, 'Title', { category => 'Trees', latitude => 52.5609, longitude => 0.2405, cobrand => 'peterborough' });
         $p->push_extra_fields({ name => 'emergency', value => 'no'});
         $p->push_extra_fields({ name => 'private_land', value => 'no'});
         $p->push_extra_fields({ name => 'PCC-light', value => 'whatever'});
@@ -67,7 +74,7 @@ subtest 'open311 request handling', sub {
         FixMyStreet::Script::Reports::send();
 
         $p->discard_changes;
-        ok $p->whensent, 'Report marked as sent';
+        is $p->send_state, 'sent', 'Report marked as sent';
         is $p->send_method_used, 'Open311', 'Report sent via Open311';
         is $p->external_id, 248, 'Report has correct external ID';
         is $p->get_extra_field_value('emergency'), 'no';
@@ -79,6 +86,7 @@ subtest 'open311 request handling', sub {
         is $c->param('attribute[private_land]'), undef, 'no private_land param sent';
         is $c->param('attribute[PCC-light]'), undef, 'no pcc- param sent';
         is $c->param('attribute[tree_code]'), 'tree-42', 'tree_code param sent';
+        is $c->param('attribute[site_code]'), 'ROAD', 'site_code found';
     };
 };
 
@@ -95,7 +103,7 @@ subtest "extra update params are sent to open311" => sub {
         );
 
         my ($p) = $mech->create_problems_for_body(1, $peterborough->id, 'Title', {
-            external_id => 1, category => 'Trees', whensent => DateTime->now,
+            external_id => 1, category => 'Trees', send_state => 'sent',
             send_method_used => "Open311", cobrand => 'peterborough' });
 
         my $c = FixMyStreet::DB->resultset('Comment')->create({
@@ -124,12 +132,12 @@ subtest "bartec report with no geocode handled correctly" => sub {
         ALLOWED_COBRANDS => 'peterborough',
     }, sub {
         my $contact = $mech->create_contact_ok(body_id => $peterborough->id, category => 'Bins', email => 'Bartec-Bins');
-        ($problem) = $mech->create_problems_for_body(1, $peterborough->id, 'Title', { category => 'Bins', latitude => 52.5608, longitude => 0.2405, cobrand => 'peterborough', areas => ',2566,' });
+        ($problem) = $mech->create_problems_for_body(1, $peterborough->id, 'Title', { category => 'Bins', latitude => 52.5607, longitude => 0.2405, cobrand => 'peterborough', areas => ',2566,' });
 
         FixMyStreet::Script::Reports::send();
 
         $problem->discard_changes;
-        ok $problem->whensent, 'Report marked as sent';
+        is $problem->send_state, 'sent', 'Report marked as sent';
 
         my $req = Open311->test_req_used;
         my $cgi = CGI::Simple->new($req->content);
@@ -172,15 +180,12 @@ subtest "extra bartec params are sent to open311" => sub {
             longitude => 0.2405,
             cobrand => 'peterborough',
             geocode => {
-                resourceSets => [ {
-                    resources => [ {
-                        name => '12 A Street, XX1 1SZ',
-                        address => {
-                            addressLine => '12 A Street',
-                            postalCode => 'XX1 1XZ'
-                        }
-                    } ]
-                } ]
+                display_name => '12 A Street, XX1 1SZ',
+                address => {
+                    house_number => '12',
+                    road => 'A Street',
+                    postcode => 'XX1 1SZ'
+                }
             },
             extra => {
                 contributed_by => $staffuser->id,
@@ -195,11 +200,11 @@ subtest "extra bartec params are sent to open311" => sub {
         FixMyStreet::Script::Reports::send();
 
         $report->discard_changes;
-        ok $report->whensent, 'Report marked as sent';
+        is $report->send_state, 'sent', 'Report marked as sent';
 
         my $req = Open311->test_req_used;
         my $cgi = CGI::Simple->new($req->content);
-        is $cgi->param('attribute[postcode]'), 'XX1 1XZ', 'postcode param sent';
+        is $cgi->param('attribute[postcode]'), 'XX1 1SZ', 'postcode param sent';
         is $cgi->param('attribute[house_no]'), '12', 'house_no param sent';
         is $cgi->param('attribute[street]'), 'A Street', 'street param sent';
         is $cgi->param('attribute[contributed_by]'), $staffuser->email, 'staff email address sent';
@@ -246,7 +251,7 @@ for my $test (
             my $sender = $cobrand->get_body_sender($peterborough, $p);
             is $sender->{method}, $test->{method}, "correct body sender set";
 
-            $p->update({ whensent => \"current_timestamp" });
+            $p->update({ send_state => 'sent' });
         };
     };
 }
@@ -266,15 +271,12 @@ subtest "flytipping on PCC land is sent by open311 and email" => sub {
             longitude => 0.2505,
             cobrand => 'peterborough',
             geocode => {
-                resourceSets => [ {
-                    resources => [ {
-                        name => '12 A Street, XX1 1SZ',
-                        address => {
-                            addressLine => '12 A Street',
-                            postalCode => 'XX1 1XZ'
-                        }
-                    } ]
-                } ]
+                display_name => '12 A Street, XX1 1SZ',
+                address => {
+                    house_number => '12',
+                    road => 'A Street',
+                    postcode => 'XX1 1SZ'
+                }
             },
             extra => {
                 _fields => [
@@ -285,7 +287,7 @@ subtest "flytipping on PCC land is sent by open311 and email" => sub {
 
         FixMyStreet::Script::Reports::send();
         $p->discard_changes;
-        ok $p->whensent, 'Report marked as sent';
+        is $p->send_state, 'sent', 'Report marked as sent';
         is $p->get_extra_metadata('sent_to')->[0], 'flytipping@example.org', 'sent_to extra metadata is set';
         is $p->state, 'confirmed', 'report state unchanged';
         is $p->comments->count, 0, 'no comment added';
@@ -347,15 +349,12 @@ subtest "flytipping on non PCC land is emailed" => sub {
             longitude => 0.2405,
             cobrand => 'peterborough',
             geocode => {
-                resourceSets => [ {
-                    resources => [ {
-                        name => '12 A Street, XX1 1SZ',
-                        address => {
-                            addressLine => '12 A Street',
-                            postalCode => 'XX1 1XZ'
-                        }
-                    } ]
-                } ]
+                display_name => '12 A Street, XX1 1SZ',
+                address => {
+                    house_number => '12',
+                    road => 'A Street',
+                    postcode => 'XX1 1SZ'
+                }
             },
             extra => {
                 _fields => [
@@ -367,12 +366,12 @@ subtest "flytipping on non PCC land is emailed" => sub {
         FixMyStreet::Script::Reports::send();
 
         $p->discard_changes;
-        ok $p->whensent, 'Report marked as sent';
+        is $p->send_state, 'sent', 'Report marked as sent';
         is $p->get_extra_metadata('flytipping_email'), undef, 'flytipping_email extra metadata unset';
         is $p->get_extra_metadata('sent_to')->[0], 'flytipping@example.org', 'sent_to extra metadata set';
         is $p->state, 'closed', 'report closed having sent email';
         is $p->comments->count, 1, 'comment added';
-        like $p->comments->first->text, qr/As this is private land/, 'correct comment text';
+        like $p->comments->first->text, qr/You can report cases/, 'correct comment text';
         ok !Open311->test_req_used, 'no open311 sent';
 
         $mech->email_count_is(1);
@@ -382,6 +381,7 @@ subtest "flytipping on non PCC land is emailed" => sub {
 };
 
 subtest 'Dashboard CSV extra columns' => sub {
+    my $UPLOAD_DIR = tempdir( CLEANUP => 1 );
     $report->update({
         state => 'unable to fix',
     });
@@ -389,11 +389,26 @@ subtest 'Dashboard CSV extra columns' => sub {
     FixMyStreet::override_config {
         MAPIT_URL => 'http://mapit.uk/',
         ALLOWED_COBRANDS => 'peterborough',
+        PHOTO_STORAGE_OPTIONS => { UPLOAD_DIR => $UPLOAD_DIR },
     }, sub {
         $mech->get_ok('/dashboard?export=1');
     };
     $mech->content_contains('"Reported As","Staff User",USRN,"Nearest address","External ID","External status code",Light,"CSC Ref"');
     $mech->content_like(qr/"No further action",.*?,peterborough,,[^,]*counciluser\@example.com,12345,"12 A Street, XX1 1SZ",248,EXT,light-ref,/);
+    FixMyStreet::override_config {
+        MAPIT_URL => 'http://mapit.uk/',
+        ALLOWED_COBRANDS => 'peterborough',
+        PHOTO_STORAGE_OPTIONS => { UPLOAD_DIR => $UPLOAD_DIR },
+    }, sub {
+        FixMyStreet::Script::CSVExport::process(dbh => FixMyStreet::DB->schema->storage->dbh);
+        $mech->get_ok('/dashboard?export=1');
+        $mech->content_contains('"Reported As","Staff User",USRN,"Nearest address","External ID","External status code",Light,"CSC Ref"');
+        $mech->content_like(qr/"No further action",.*?,peterborough,,[^,]*counciluser\@example.com,12345,"12 A Street, XX1 1SZ",248,EXT,light-ref,/);
+        $mech->get_ok('/dashboard?export=1&state=unable+to+fix');
+        $mech->content_contains("No further action");
+        $mech->get_ok('/dashboard?export=1&state=confirmed');
+        $mech->content_lacks("No further action");
+    };
 };
 
 subtest 'Resending between backends' => sub {
@@ -421,10 +436,10 @@ subtest 'Resending between backends' => sub {
             $mech->submit_form_ok({ with_fields => { category => $_->{category} } }, "Switch to $_->{category}");
             $problem->discard_changes;
             if ($_->{resent}) {
-                is $problem->whensent, undef, "Marked for resending";
-                $problem->update({ whensent => $whensent, send_method_used => $_->{method} || 'Open311' }); # reset as sent
+                is $problem->send_state, 'unprocessed', "Marked for resending";
+                $problem->update({ whensent => $whensent, send_method_used => $_->{method} || 'Open311', send_state => 'sent' }); # reset as sent
             } else {
-                isnt $problem->whensent, undef, "Not marked for resending";
+                is $problem->send_state, 'sent', "Not marked for resending";
             }
         }
     };

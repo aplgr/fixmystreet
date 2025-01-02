@@ -132,6 +132,13 @@ function isR2L() {
             settings.noneText = $select.data('none');
         }
 
+        if ($select.attr("id") == 'filter_categories' || $select.attr("id") == 'statuses') {
+            settings.menuItemsHTML = '<div class="govuk-multi-select govuk-multi-select--checkboxes">';
+            settings.menuItemHTML = '<label class="govuk-multi-select__label">';
+            settings.menuFieldsetHTML = '<fieldset class="multi-select-fieldset govuk-fieldset">';
+            settings.menuFieldsetLegendHTML = '<legend class="multi-select-fieldset govuk-fieldset__legend govuk-fieldset__legend--s">';
+        }
+
         if ( $select.data('all') ) {
             settings.allText = $select.data('all');
             settings.noneText = settings.noneText || settings.allText;
@@ -174,6 +181,7 @@ fixmystreet.mobile_reporting = {
     $('html').addClass('map-fullscreen only-map map-reporting map-with-crosshairs1');
     $('html').removeClass('map-with-crosshairs3 map-with-crosshairs2');
     $('#map_box').removeClass('hidden-js');
+    $('#map_box').on('contextmenu', function(e) { e.preventDefault(); });
 
     if (fixmystreet.page === 'new') {
         // Might have come direct to report/new, need right buttons
@@ -223,7 +231,7 @@ fixmystreet.mobile_reporting = {
 fixmystreet.resize_to = {
   mobile_page: function() {
     $('html').addClass('mobile');
-    if (typeof fixmystreet !== 'undefined' && (fixmystreet.page === 'around' || fixmystreet.page === 'new')) {
+    if (typeof fixmystreet !== 'undefined' && (fixmystreet.page === 'around' || fixmystreet.page === 'new') && Modernizr.mq('(min-height: 30em)')) {
         fixmystreet.mobile_reporting.apply_ui();
     }
 
@@ -374,11 +382,7 @@ fixmystreet.set_up = fixmystreet.set_up || {};
 $.extend(fixmystreet.set_up, {
   basics: function() {
     // Preload the new report pin
-    if ( typeof fixmystreet !== 'undefined' && typeof fixmystreet.pin_prefix !== 'undefined' ) {
-        document.createElement('img').src = fixmystreet.pin_prefix + 'pin-' + fixmystreet.pin_new_report_colour + '.png';
-    } else {
-        document.createElement('img').src = '/i/pin-green.png';
-    }
+    document.createElement('img').src = '/i/pins/' + (fixmystreet.pin_new_report_colour || 'green') + '/pin.png';
 
     $('a[href*="around"]').each(function() {
         this.href = this.href + (this.href.indexOf('?') > -1 ? '&js=1' : '?js=1');
@@ -422,9 +426,12 @@ $.extend(fixmystreet.set_up, {
             return this.optional(element) || value != ''; }, translation_strings.category );
         jQuery.validator.addMethod('js-password-validate', function(value, element) {
             return !value || value.length >= fixmystreet.password_minimum_length;
-        }, translation_strings.password_register.short);
+        }, translation_strings.password_register.short.replace(/%d/, fixmystreet.password_minimum_length));
         jQuery.validator.addMethod('notEmail', function(value, element) {
             return this.optional(element) || !/^[a-zA-Z0-9.!#$%&'*+\/=?^_`{|}~-]+@(?:\S{1,63})$/.test( value ); }, translation_strings.title );
+        jQuery.validator.addMethod('in-the-past', function(value, element) {
+            return this.optional(element) || new Date(value) <= new Date(); }, translation_strings.in_the_past );
+        jQuery.validator.addClassRules('at-least-one-group', { require_from_group: [1, ".at-least-one-group"] });
     }
 
     var submitted = false;
@@ -445,6 +452,16 @@ $.extend(fixmystreet.set_up, {
         errorElement: 'div',
         errorClass: 'form-error',
         errorPlacement: function( error, element ) {
+            if (element.hasClass('group-error-propagate')) {
+                var groupParent = element.parents('.group-error-propagate-end');
+                if (groupParent) {
+                    var target = groupParent.find('.group-error-place-after');
+                    if (target) {
+                        target.after(error);
+                        return;
+                    }
+                }
+            }
             var typ = element.attr('type');
             if (typ == 'radio' || typ == 'checkbox') {
                 element.parent().before( error );
@@ -474,11 +491,11 @@ $.extend(fixmystreet.set_up, {
 
     /* set correct required status depending on what we submit */
     $('.js-submit_sign_in').on('click', function(e) {
-        $('.js-form-name').removeClass('required');
+        $('.js-form-name').removeClass('required').removeAttr('aria-required');
     } );
 
     $('.js-submit_register').on('click', function(e) {
-        $('.js-form-name').addClass('required');
+        $('.js-form-name').addClass('required').attr('aria-required', true);
     } );
 
     $('#facebook_sign_in, #twitter_sign_in, #oidc_sign_in').on('click', function(e){
@@ -488,38 +505,41 @@ $.extend(fixmystreet.set_up, {
     $('#planned_form').on('submit', function(e) {
         if (e.metaKey || e.ctrlKey) {
             return;
-        }
+        } 
+
         e.preventDefault();
-        var $form = $(this),
-            $submit = $form.find("input[type='submit']" ),
-            $labels = $('label[for="' + $submit.attr('id') + '"]'),
-            problemId = $form.find("input[name='id']").val(),
-            data = $form.serialize() + '&ajax=1',
-            changeValue,
-            buttonLabel,
-            buttonValue,
-            classToAdd,
-            classToRemove;
+        var $form = $(this);
+        var $submit = $('button[form="planned_form"]');
+        var problemId = $form.find("input[name='id']").val();
+        var data = $form.serialize() + '&ajax=1';
 
         $.post(this.action, data, function(data) {
-            if (data.outcome == 'add') {
-                $form.find("input[name='shortlist-add']" ).attr('name', 'shortlist-remove');
+            var inputName, newInputName, buttonLabel, buttonValue, classToAdd, classToRemove;
+
+            if (data.outcome === 'add') {
+                inputName = 'shortlist-add';
+                newInputName = 'shortlist-remove';
                 buttonLabel = $submit.data('label-remove');
                 buttonValue = $submit.data('value-remove');
                 classToAdd = $submit.data('class-remove');
                 classToRemove = $submit.data('class-add');
                 $('.shortlisted-status').remove();
                 $(document).trigger('shortlist-add', problemId);
-            } else if (data.outcome == 'remove') {
-                $form.find("input[name='shortlist-remove']" ).attr('name', 'shortlist-add');
+            } else if (data.outcome === 'remove') {
+                inputName = 'shortlist-remove';
+                newInputName = 'shortlist-add';
                 buttonLabel = $submit.data('label-add');
                 buttonValue = $submit.data('value-add');
-                $(document).trigger('shortlist-remove', problemId);
                 classToAdd = $submit.data('class-add');
                 classToRemove = $submit.data('class-remove');
+                $(document).trigger('shortlist-remove', problemId);
             }
-            $submit.val(buttonValue).attr('aria-label', buttonLabel).removeClass(classToRemove).addClass(classToAdd);
-            $labels.text(buttonValue).attr('aria-label', buttonLabel).removeClass(classToRemove).addClass(classToAdd);
+
+            $form.find("input[name='" + inputName + "']").attr('name', newInputName);
+            $submit.text(buttonValue)
+                   .attr('aria-label', buttonLabel)
+                   .removeClass(classToRemove)
+                   .addClass(classToAdd);
         });
     });
   },
@@ -575,8 +595,11 @@ $.extend(fixmystreet.set_up, {
 
         if (!$.isEmptyObject(data)) {
             fixmystreet.bodies = data.bodies || [];
+            fixmystreet.selected_category_data = data;
+
         } else {
             fixmystreet.bodies = fixmystreet.reporting_data.bodies || [];
+            fixmystreet.selected_category_data = {};
         }
         if (fixmystreet.body_overrides) {
             fixmystreet.body_overrides.clear();
@@ -609,6 +632,11 @@ $.extend(fixmystreet.set_up, {
             $(".js-hide-if-public-category").hide();
             $('#form_non_public').prop('checked', false).prop('disabled', false);
         }
+        if (data.category_photo_required) {
+            $(".js-hide-if-category-photo-required").addClass('hidden-js');
+        } else {
+            $(".js-hide-if-category-photo-required").removeClass('hidden-js');
+        }
         if (data.allow_anonymous) {
             $('.js-show-if-anonymous').removeClass('hidden-js');
             $('.js-reporting-page--include-if-anonymous').removeClass('js-reporting-page--skip');
@@ -616,8 +644,17 @@ $.extend(fixmystreet.set_up, {
             $('.js-show-if-anonymous').addClass('hidden-js');
             $('.js-reporting-page--include-if-anonymous').addClass('js-reporting-page--skip');
         }
+        if (data.phone_required) {
+            $("#form_phone").prop('required', true);
+            $("#js-optional-phone").hide();
+        } else {
+            $("#form_phone").prop('required', false);
+            $("#js-optional-phone").show();
+        }
 
+        text_update('#title-label', data.title_label);
         text_update('#title-hint', data.title_hint);
+        text_update('#detail-label', data.detail_label);
         text_update('#detail-hint', data.detail_hint);
 
         if (fixmystreet.message_controller && data.disable_form && data.disable_form.questions) {
@@ -647,6 +684,46 @@ $.extend(fixmystreet.set_up, {
             }
         });
 
+        // unhide hidden elements
+        $.each(fixmystreet.hidden_elements, function(index, element) {
+            element.show();
+        });
+        fixmystreet.hidden_elements = [];
+
+        // Hide shown elements (that were previously triggered via
+        // show_element_rules). This prevents elements from remaining
+        // displayed if user clicks back to select another category.
+        $.each(fixmystreet.shown_elements, function() {
+            this.classList.add('hidden');
+        });
+        fixmystreet.shown_elements = [];
+
+        // apply hide & show element rules
+        var selectors;
+        $.each(fixmystreet.bodies, function(index, body) {
+            if ( typeof hide_element_rules !== 'undefined' && hide_element_rules[body] && hide_element_rules[body][category] ) {
+                selectors = hide_element_rules[body][category];
+                $(selectors.join(',')).each(function () {
+                    if ($(this).css('display') === 'none') {
+                        return;
+                    }
+                    $(this).hide();
+                    fixmystreet.hidden_elements.push($(this));
+                });
+            }
+
+            if ( typeof show_element_rules !== 'undefined' &&
+                show_element_rules[body] &&
+                show_element_rules[body][category] )
+            {
+                selectors = show_element_rules[body][category];
+                $(selectors.join(',')).each(function () {
+                    this.classList.remove('hidden');
+                    fixmystreet.shown_elements.push(this);
+                });
+            }
+        });
+
         $(fixmystreet).trigger('report_new:category_change');
     };
     fixmystreet.reporting.topLevelPoke = function() {
@@ -669,18 +746,18 @@ $.extend(fixmystreet.set_up, {
         var $subcategory_page = $('.js-reporting-page--subcategory');
         var subcategory_id = $(this).data("subcategory");
         $(".js-subcategory").addClass('hidden-js');
-        var $input;
+        var val;
         if (subcategory_id === undefined) {
             $subcategory_page.addClass('js-reporting-page--skip');
-            $input = $(this);
+            val = $(this).data('valuealone'); // Don't want "H" hoisted bit of the submitted value
         } else {
             $subcategory_page.removeClass('js-reporting-page--skip');
             var $subcategory = $("#subcategory_" + subcategory_id);
             $subcategory.removeClass('hidden-js');
-            $input = $subcategory.find('input:checked');
+            val = $subcategory.find('input:checked').val();
         }
         if (!no_event) {
-            category_changed($input.val());
+            category_changed(val);
         }
     });
 
@@ -689,6 +766,150 @@ $.extend(fixmystreet.set_up, {
     // function again, due to it calling change() on the category if set.
     if (!fixmystreet.reporting_data && fixmystreet.page === 'new' && !$('body').hasClass('formflow')) {
         fixmystreet.fetch_reporting_data();
+    }
+  },
+
+  category_filtering: function(subsequent) {
+    var category_row = document.getElementById('form_category_row');
+    var category_fieldset = document.getElementById('form_category_fieldset');
+    var category_filter = document.getElementById('category-filter');
+    if (!category_row || !category_fieldset || !category_filter) {
+        return;
+    }
+    /* Make copy of subcats for direct display if matching filter */
+    document.querySelectorAll('#form_subcategory_row fieldset').forEach(function(fieldset) {
+        var copy = fieldset.cloneNode(true);
+        var group_id = copy.id.replace('subcategory_', '');
+        copy.id = 'js-filter-' + copy.id;
+        copy.classList.remove('js-subcategory');
+        copy.classList.add('js-filter-subcategory');
+
+        copy.addEventListener('change', function(evt) {
+            // A subcategory has been picked in this copy. Update the actual entry
+            var target = evt.target;
+            var actual_id = target.id.replace('js-filter-', '');
+            var group_id = target.name.replace('js-filter-category\.', '');
+            var actual = document.getElementById(actual_id);
+
+            // Remove any other selected things
+            category_row.querySelectorAll("input").forEach(function(input) {
+                if (input !== target) {
+                    input.checked = false;
+                }
+            });
+
+            // Select the right category
+            category_fieldset.querySelector('#category_' + group_id).checked = true;
+            // Select the right subcategory
+            actual.checked = true;
+            // Mark the subcategory page as skippable
+            document.querySelector('.js-reporting-page--subcategory').classList.add('js-reporting-page--skip');
+            // Trigger a change event on the choice
+            var event = document.createEvent('HTMLEvents');
+            event.initEvent('change', true, false);
+            actual.dispatchEvent(event);
+        });
+        // Update all the items to have unique IDs
+        copy.querySelectorAll('.govuk-radios__item').forEach(function(item) {
+            var input = item.querySelector('input');
+            var label = item.querySelector('label');
+            input.id = 'js-filter-' + input.id;
+            input.name = 'js-filter-' + input.name;
+            input.classList.remove('required');
+            label.htmlFor = 'js-filter-' + label.htmlFor;
+        });
+
+        // Insert the copy just after the category option these are the subcategories for
+        var category_div = category_fieldset.querySelector('#category_' + group_id).parentNode;
+        category_fieldset.insertBefore(copy, category_div.nextSibling);
+    });
+
+    /* If category picked, make sure to uncheck all copy-of-subcategories */
+    category_fieldset.addEventListener("change", function(e) {
+        if (e.target.name === 'category') {
+            document.querySelectorAll('.js-filter-subcategory input').forEach(function(input) {
+                input.checked = false;
+            });
+        }
+    });
+
+    /* Update when key lifted in search box */
+    var filter_keyup = function() {
+        var items = category_row.querySelectorAll(".govuk-radios__item");
+        var i;
+        if (this.value) {
+            var haystack = [];
+            items.forEach(function(item) {
+                item.querySelector('input').checked = false;
+                var txt = item.textContent;
+                haystack.push(txt);
+            });
+            var uf = new uFuzzy();
+            var results = uf.search(haystack, this.value, 1);
+            var subcats_to_show = {};
+            for (i = 0; i<items.length; i++) {
+                var input = items[i].querySelector('input'),
+                    match = !(results[0] && results[0].indexOf(i) < 0),
+                    in_matching_subcat = subcats_to_show[input.name];
+                items[i].classList.toggle('hidden-category-filter', !(in_matching_subcat || match));
+                if (match && input.name !== 'category') {
+                    // A subcategory, make sure category item is shown, disabled. We've already passed it in the loop
+                    var group_id = input.name.replace('js-filter-category.', '');
+                    var category_div = category_row.querySelector('#category_' + group_id).parentNode; // div
+                    category_div.classList.remove('hidden-category-filter');
+                    category_div.classList.add('js-filter-disabled');
+                }
+                // If this is a category with subcategories, show every item in the subcategory
+                if (input.dataset.subcategory) {
+                    items[i].classList.toggle('js-filter-disabled', match);
+                    if (match) {
+                        subcats_to_show['js-filter-category.' + input.dataset.subcategory] = true;
+                    }
+                }
+            }
+            // Show the fieldsets (their contents hidden/shown by the above)
+            category_row.querySelectorAll('fieldset').forEach(function(fieldset) {
+                fieldset.classList.remove('hidden-js');
+            });
+            /* If the filtering reduces the list to one, the web page becomes
+             * so short that the bottom of the page moves down, underneath the
+             * on-screen keyboard and your input box disappears. This feels like
+             * a bug in the web browser but I doubt it is going to be fixed any
+             * time soon. Introduce some padding so this does not happen. */
+            category_row.style.paddingBottom = window.innerHeight + 'px';
+            disable_on_empty();
+        } else {
+            // Hide all the copied subcategories
+            document.querySelectorAll('.js-filter-subcategory').forEach(function(fieldset) {
+                fieldset.classList.add('hidden-js');
+            });
+            for (i = 0; i<items.length; i++) {
+                items[i].classList.remove('hidden-category-filter');
+                items[i].classList.remove('js-filter-disabled');
+            }
+            category_row.style.paddingBottom = null;
+            disable_on_empty();
+        }
+
+        function disable_on_empty() {
+            // If there are no items found, give a message and disable the Continue button
+            if (items.length && items.length === document.querySelectorAll(".hidden-category-filter").length) {
+                $('#js-top-message').html('<p class="form-error" id="filter-category-error">Please try another search or delete your search and choose from the categories</p>');
+                $('.js-reporting-page--next').prop("disabled",true);
+                category_row.style.paddingBottom = null;
+            } else {
+                $('#filter-category-error').remove();
+                $('.js-reporting-page--next').prop("disabled",false);
+            }
+        }
+    };
+
+    if (!subsequent) {
+        category_filter.addEventListener('keyup', filter_keyup);
+        category_filter.addEventListener('blur', function() {
+            category_row.style.paddingBottom = null;
+        });
+        filter_keyup.apply(category_filter);
     }
   },
 
@@ -704,6 +925,9 @@ $.extend(fixmystreet.set_up, {
                   $el.attr('maxlength', rule.maxlength);
                 } else {
                   $el.removeAttr('maxlength');
+                }
+                if (rule.required) {
+                  $el.attr('aria-required', true);
                 }
             }
         });
@@ -776,7 +1000,7 @@ $.extend(fixmystreet.set_up, {
       var $originalInputs = $('#form_photos, .js-photo-fields', $context);
       $originalInputs.each(function() {
         var $originalInput = $(this);
-        var $dropzone = $('<div tabindex=0>').addClass('dropzone');
+        var $dropzone = $('<div tabindex=0 role="button">').addClass('dropzone');
         var $fileid_input = $originalInput.data('upload-field') || 'upload_fileid';
         var max_photos = !isNaN($originalInput.data('max-photos')) ? $originalInput.data('max-photos') : 3;
 
@@ -790,6 +1014,7 @@ $.extend(fixmystreet.set_up, {
         if ($("html").hasClass("mobile")) {
             default_message = translation_strings.upload_default_message_mobile;
         }
+        var prevFile;
         var photodrop = new Dropzone($dropzone[0], {
             url: '/photo/upload',
             paramName: 'photo',
@@ -814,11 +1039,18 @@ $.extend(fixmystreet.set_up, {
               $originalInput.show();
             },
             init: function() {
+              // Add aria-label for accessibility
+              // From https://github.com/dropzone/dropzone/pull/2214
+              this.hiddenFileInput.setAttribute("aria-label", "hidden file upload");
+
               this.on("addedfile", function(file) {
-                $('input[type=submit]', $context).prop("disabled", true).removeClass('green-btn');
+                if (max_photos == 1 && prevFile) {
+                    this.removeFile(prevFile);
+                }
+                $('input[type=submit]', $context).prop("disabled", true);
               });
               this.on("queuecomplete", function() {
-                $('input[type=submit]', $context).prop('disabled', false).addClass('green-btn');
+                $('input[type=submit]', $context).prop('disabled', false);
               });
               this.on("success", function(file, xhrResponse) {
                 var $upload_fileids = $('input[name="' + $fileid_input + '"]', $context);
@@ -832,6 +1064,9 @@ $.extend(fixmystreet.set_up, {
                     l = ids.push(id);
                 newstr = ids.join(',');
                 $upload_fileids.val(newstr);
+                if (max_photos == 1) {
+                    prevFile = file;
+                }
               });
               this.on("error", function(file, errorMessage, xhrResponse) {
               });
@@ -840,6 +1075,9 @@ $.extend(fixmystreet.set_up, {
                 var ids = $upload_fileids.val().split(','),
                     newstr = $.grep(ids, function(n) { return (n!=file.server_id); }).join(',');
                 $upload_fileids.val(newstr);
+                if (max_photos == 1) {
+                    prevFile = null;
+                }
               });
               this.on("maxfilesexceeded", function(file) {
                 this.removeFile(file);
@@ -870,7 +1108,7 @@ $.extend(fixmystreet.set_up, {
             if (!f) {
                 return;
             }
-            var mockFile = { name: f, server_id: f, dataURL: '/photo/temp.' + f };
+            var mockFile = { name: f, server_id: f, dataURL: '/photo/temp.' + f, status: Dropzone.SUCCESS, accepted: true };
             photodrop.emit("addedfile", mockFile);
             photodrop.createThumbnailFromUrl(mockFile,
                 photodrop.options.thumbnailWidth, photodrop.options.thumbnailHeight,
@@ -878,7 +1116,9 @@ $.extend(fixmystreet.set_up, {
                     photodrop.emit('thumbnail', mockFile, thumbnail);
                 });
             photodrop.emit("complete", mockFile);
-            photodrop.options.maxFiles -= 1;
+            photodrop.files.push(mockFile);
+            photodrop._updateMaxFilesReachedClass();
+            prevFile = mockFile;
         });
       });
     });
@@ -887,17 +1127,75 @@ $.extend(fixmystreet.set_up, {
   report_list_filters: function() {
     // Hide the pin filter submit button. Not needed because we'll use JS
     // to refresh the map when the filter inputs are changed.
-    $(".report-list-filters [type=submit]").hide();
+    $(".report-list-filters-wrapper [type=submit]").hide();
 
     // There are also other uses of this besides report list filters activated here
     $('.js-multiple').make_multi();
 
+    // Make clicking on Everything when selected un-select everything (workaround)
+    var $elt = $('#filter_categories');
+    var all_label = $elt.data('all');
+    $('label:contains("' + all_label + '") input[name="filter_category_presets"]').on('click', function(e) {
+        var options = $elt.find('option').length;
+        var selected = $elt.find('option:selected').length;
+        if (selected === options) {
+            $elt.val([]);
+            $elt.trigger('change');
+        }
+    });
+
+    // Make clicking on the legends toggle all the checkboxes underneath
+    var container = $elt.next('.multi-select-container');
+    container.on('click', 'legend', function(){
+        var optgroup = $elt.find('optgroup[label="' + this.textContent + '"]');
+        var options = optgroup.find('option');
+        var options_selected = options.filter(':selected');
+
+        if (options.length === options_selected.length) {
+            // Switch them all off
+            options_selected.prop('selected', false);
+        } else {
+            // Switch them all on
+            options.not(options_selected).prop('selected', true);
+        }
+        $elt.trigger('change');
+    });
+
     function update_label(id, str) {
-        $(id).prev('label').addClass('hidden-js').after(function(){ return $('<span>' + this.innerHTML + '</span>'); });
+        $(id).prevAll('label').addClass('hidden-js').attr('for', id.slice(1)).after(function(){ return $('<span>' + this.innerHTML + '</span>'); });
         $(id).next('.multi-select-container').children('.multi-select-button').attr('aria-label', str);
     }
     update_label('#statuses', translation_strings.select_status_aria_label);
     update_label('#filter_categories', translation_strings.select_category_aria_label);
+  },
+
+  has_selector_checker: function() {
+    var supportsHas = CSS.supports('selector(:has(*))');
+
+    if (!supportsHas) {
+        $('.govuk-multi-select__label').each(function() {
+            var label = $(this);
+            var input = label.find('input[type="checkbox"], input[type="radio"]');
+      
+            if (input.attr('type') === 'checkbox') {
+              label.addClass('govuk-multi-select__label--checkbox');
+            } else if (input.attr('type') === 'radio') {
+              label.addClass('govuk-multi-select__label--radio');
+            }
+      
+            if (input.prop('checked')) {
+              label.addClass('govuk-multi-select__label--checked');
+            }
+      
+            input.on('change', function() {
+              if (this.checked) {
+                label.addClass('govuk-multi-select__label--checked');
+              } else {
+                label.removeClass('govuk-multi-select__label--checked');
+              }
+            });
+          });
+    }
   },
 
   label_accessibility_update: function() {
@@ -905,7 +1203,7 @@ $.extend(fixmystreet.set_up, {
     // proper aria-label to improve accessibility.
     function replace_label(id, sibling_class, sibling_child, str) {
         $(id).siblings(sibling_class).children(sibling_child).attr('aria-label', str);
-        $(id).addClass('hidden-js').after(function(){ return $('<span>' + this.innerHTML + '</span>'); });
+        $(id).addClass('hidden-js').after(function(){ return $('<span class="label">' + this.innerHTML + '</span>'); });
     }
     replace_label('#photo-upload-label','.dropzone.dz-clickable', '.dz-default.dz-message', translation_strings.upload_aria_label);
   },
@@ -1117,6 +1415,10 @@ $.extend(fixmystreet.set_up, {
         $('.js-sign-in-password').show().css('visibility', 'visible');
     });
 
+    $('[name=sign_in_by_code]').on('click', function() {
+        $('#password_sign_in').removeClass('required');
+    });
+
     var show = function(selector) {
         var deferred = $.Deferred();
         $(selector).hide().removeClass('hidden-js').slideDown(400, function(){
@@ -1159,7 +1461,7 @@ $.extend(fixmystreet.set_up, {
         $('.js-new-report-user-hidden')[0].scrollIntoView({behavior: "smooth"});
         hide('.js-new-report-user-hidden');
         show('.js-new-report-user-shown').then(function(){
-            focusFirstVisibleInput();
+            $(this).find('.form-section-preview h2').trigger('focus');
         });
     });
 
@@ -1177,7 +1479,7 @@ $.extend(fixmystreet.set_up, {
         focusFirstVisibleInput();
     });
 
-    $('.js-new-report-sign-in-forgotten').on('click', function() {
+    $('.js-new-report-sign-in-forgotten').on('click', function(e) {
         e.preventDefault();
         $('.js-new-report-sign-in-shown').addClass('hidden-js');
         $('.js-new-report-sign-in-hidden').removeClass('hidden-js');
@@ -1264,14 +1566,26 @@ $.extend(fixmystreet.set_up, {
 
   reporting_required_phone_email: function() {
     var fem = $('#form_email');
+    var fem_optional = $('#js-optional-email-update-method-triggered');
     var fph = $('#form_phone');
+    var fph_optional = $('#js-optional-phone-update-method-triggered');
+
     $('#update_method_email').on('change', function() {
       fem.prop('required', true);
-      fph.prop('required', false);
+      fem_optional.addClass('hidden-js');
+      if (!fixmystreet.selected_category_data.phone_required) {
+          fph.prop('required', false);
+          fph_optional.removeClass('hidden-js');
+      } else {
+          fph.prop('required', true);
+          fph_optional.addClass('hidden-js');
+      }
     });
     $('#update_method_phone').on('change', function() {
-      fem.prop('required', false);
       fph.prop('required', true);
+      fph_optional.addClass('hidden-js');
+      fem.prop('required', false);
+      fem_optional.removeClass('hidden-js');
     });
   },
 
@@ -1288,8 +1602,8 @@ $.extend(fixmystreet.set_up, {
     // Go directly to RSS feed if RSS button clicked on alert page
     // (due to not wanting around form to submit, though good thing anyway)
     $('#distance').on('change', function() {
-        var dist = this.value;
-        if (!parseInt(dist)) {
+        var dist = this.value.replace(/,/, '.');
+        if (!parseFloat(dist)) {
             return;
         }
         var a = $('a.js-alert-local');
@@ -1300,18 +1614,33 @@ $.extend(fixmystreet.set_up, {
     });
     $('body').on('click', '#alert_rss_button', function(e) {
         e.preventDefault();
-        var a = $('input[name=feed][type=radio]:checked').parent().prevAll('a');
-        var feed = a.attr('href');
+        var val = $('input[name=feed][type=radio]:checked').val();
+        var a = document.getElementById('rss-' + val);
+        var feed = a.href;
         window.location.href = feed;
     });
     $('body').on('click', '#alert_email_button', function(e) {
         e.preventDefault();
+
+        var wrapper = this.closest('.js-alert-list');
+        var emailInput = wrapper.querySelector('input[type="email"]');
+        if (emailInput) {
+            emailInput.required = true;
+
+            if (!$(this).closest('form').validate().form()) {
+                emailInput.focus();
+                return;
+            }
+        }
+
         var form = $('<form/>').attr({ method:'post', action:"/alert/subscribe" });
         form.append($('<input name="alert" value="Subscribe me to an email alert" type="hidden" />'));
-        $(this).closest('.js-alert-list').find('textarea, input[type=email], input[type=text], input[type=hidden], input[type=radio]:checked').each(function() {
-            var $v = $(this);
-            $('<input/>').attr({ name:$v.attr('name'), value:$v.val(), type:'hidden' }).appendTo(form);
+
+        var inputs = wrapper.querySelectorAll('textarea, input[type=email], input[type=text], input[type=hidden], input[type=radio]:checked');
+        [].forEach.call(inputs, function(i) {
+            $('<input/>').attr({ name:i.name, value:i.value, type:'hidden' }).appendTo(form);
         });
+
         $('body').append(form);
         form.trigger('submit');
     });
@@ -1409,6 +1738,12 @@ $.extend(fixmystreet.set_up, {
               }
           }
       });
+  },
+
+  mobile_content_navigation_bar: function() {
+    $("#mobile-sticky-sidebar-button").click(function () {
+        $(".sticky-sidebar").toggle(300);
+    });
   }
 
 });
@@ -1511,12 +1846,13 @@ fixmystreet.update_pin = function(lonlat, savePushState) {
 function re_select(group, category) {
     var group_id = group.replace(/[^a-z]+/gi, '');
     var cat_in_group = $("#subcategory_" + group_id + " input[value=\"" + category + "\"]");
+    // Want only the group/category name itself, not the G| H| prefixes
     if (cat_in_group.length) {
-        $('#form_category_fieldset input[value="' + group + '"]')[0].checked = true;
+        $('#form_category_fieldset input[data-valuealone="' + group + '"]')[0].checked = true;
         cat_in_group[0].checked = true;
     } else {
         var top_level = group || category;
-        var top_level_match = $("#form_category_fieldset input[value=\"" + top_level + "\"]");
+        var top_level_match = $("#form_category_fieldset input[data-valuealone=\"" + top_level + "\"]");
         if (top_level && top_level_match.length) {
             top_level_match[0].checked = true;
         }
@@ -1564,6 +1900,10 @@ fixmystreet.fetch_reporting_data = function() {
             fixmystreet.body_overrides.clear();
         }
 
+        if (data.bodies && data.bodies.indexOf('Bristol City Council') > -1) {
+            $('#category-filter-div').hide();
+        }
+
         fixmystreet.update_councils_text(data);
         $('#js-top-message').html(data.top_message || '');
 
@@ -1601,6 +1941,7 @@ fixmystreet.fetch_reporting_data = function() {
         fixmystreet.reporting.topLevelPoke();
 
         fixmystreet.set_up.fancybox_images(); // In case e.g. top_message has pulled in a fancybox
+        fixmystreet.set_up.category_filtering(true);
 
         if ( data.extra_name_info && !$('#form_fms_extra_title').length ) {
             // there might be a first name field on some cobrands
@@ -1635,7 +1976,7 @@ fixmystreet.fetch_reporting_data = function() {
 fixmystreet.reporting = {};
 fixmystreet.reporting.selectedCategory = function() {
     var $group_or_cat_input = $('#form_category_fieldset input:checked'),
-        group_or_cat = $group_or_cat_input.val() || '',
+        group_or_cat = $group_or_cat_input.data('valuealone') || '', // Want only the group/category name itself, not the G| H| prefix
         group_id = group_or_cat.replace(/[^a-z]+/gi, ''),
         $subcategory = $("#subcategory_" + group_id),
         $subcategory_input = $subcategory.find('input:checked'),

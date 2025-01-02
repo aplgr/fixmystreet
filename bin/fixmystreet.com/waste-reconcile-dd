@@ -18,11 +18,17 @@ my ($opts, $usage) = describe_options(
     ['verbose|v', 'more verbose output'],
     ['cobrand=s', 'which cobrand to fetch events for'],
     ['help|h', "print usage message and exit" ],
+    ['reference=s', 'only look at direct debits with this reference'],
+    ['force-renewal', 'when run with --reference, force the direct debit to be a renewal'],
+    ['force-when-missing:i', 'when run with --reference, force a renewal even if no matching service, with this quantity'],
 );
 $usage->die if $opts->help;
 $usage->die unless $opts->cobrand;
 
 my $cobrand = FixMyStreet::Cobrand->get_class_for_moniker($opts->cobrand)->new;
 $cobrand->waste_reconcile_direct_debits({
-    verbose => $opts->verbose
+    verbose => $opts->verbose,
+    reference => $opts->reference,
+    force_renewal => $opts->force_renewal,
+    force_when_missing => $opts->force_when_missing,
 });

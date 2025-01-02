@@ -202,7 +202,7 @@ foreach my $test (
         is $user->password, '', 'password not yet set for new user';
     }
 
-    my $report = $user->problems->search(undef, { order_by => { -desc => 'id' } })->first;
+    my $report = $user->problems->order_by('-id')->first;
     ok $report, "Found the report";
     is $report->state, 'unconfirmed', "report not confirmed";
     is $report->bodies_str, $body->id;
@@ -285,6 +285,7 @@ subtest "test password errors for a user who is signing in as they report" => su
     # check that we got the errors expected
     is_deeply $mech->page_errors, [
         "There was a problem with your login information. If you cannot remember your password, or do not have one, please fill in the \x{2018}No\x{2019} section of the form.",
+        "There was a problem with your login information. If you cannot remember your password, or do not have one, please select \x{2018}Fill in your details manually\x{2019}.",
     ], "check there were errors";
 
     $mech->content_lacks($user->email, 'email not displayed');
@@ -333,7 +334,7 @@ subtest "test report creation for a user who is signing in as they report" => su
         );
     };
 
-    my $report = $user->problems->search(undef, { order_by => { -desc => 'id' } })->first;
+    my $report = $user->problems->order_by('-id')->first;
     ok $report, "Found the report";
     $mech->content_contains('Thank you for reporting this issue');
     is $report->bodies_str, $body->id;
@@ -389,7 +390,7 @@ subtest "test report creation for a user who is logged in" => sub {
         );
     };
 
-    my $report = $user->problems->search(undef, { order_by => { -desc => 'id' } })->first;
+    my $report = $user->problems->order_by('-id')->first;
     ok $report, "Found the report";
     is $report->bodies_str, $body->id;
     $mech->content_contains('Thank you for reporting this issue');
@@ -492,7 +493,7 @@ subtest "test report creation when sending texts via Notify" => sub {
     is_deeply $mech->page_errors, [], "check there were no errors";
 
     my $user = FixMyStreet::DB->resultset('User')->find( { phone => $test_phone } );
-    my $report = $user->problems->search(undef, { order_by => { -desc => 'id' } })->first;
+    my $report = $user->problems->order_by('-id')->first;
     ok $report, "Found the report";
     is $report->state, 'unconfirmed', "report not confirmed";
     is $report->bodies_str, $body->id;

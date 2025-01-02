@@ -1,9 +1,26 @@
+=head1 NAME
+
+FixMyStreet::Cobrand::Buckinghamshire - code specific to the Buckinghamshire cobrand
+
+=head1 SYNOPSIS
+
+We integrate with Buckinghamshire's Alloy back end for highways reporting and
+Evo for red claims, also send emails for some categories, and send
+reports to Buckinghamshire parishes based on category/speed limit.
+Emails for parish bodies can be found on this link if they are found to have changed:
+ https://buckinghamshire.moderngov.co.uk/mgParishCouncilDetails.aspx?bcr=1
+
+=head1 DESCRIPTION
+
+=cut
+
 package FixMyStreet::Cobrand::Buckinghamshire;
 use parent 'FixMyStreet::Cobrand::Whitelabel';
 
 use strict;
 use warnings;
 
+use JSON::MaybeXS;
 use Path::Tiny;
 use Moo;
 with 'FixMyStreet::Roles::Open311Alloy';
@@ -12,10 +29,12 @@ with 'FixMyStreet::Roles::BoroughEmails';
 use SUPER;
 
 
-use LWP::Simple;
+use LWP::UserAgent;
 use URI;
 use Try::Tiny;
 use Utils;
+
+use constant VEHICLE_LITTERING_CATEGORY => 'Littering From Vehicles';
 
 sub council_area_id { return 163793; }
 sub council_area { return 'Buckinghamshire'; }
@@ -47,6 +66,18 @@ sub geocoder_munge_results {
     }
 }
 
+sub new_report_title_field_label {
+    "Summarise the problem"
+}
+
+sub new_report_title_field_hint {
+    "Exact location, including any landmarks"
+}
+
+sub new_report_detail_field_hint {
+    "Dimensions, landmarks, direction of travel etc."
+}
+
 sub on_map_default_status { ('open', 'fixed') }
 
 sub around_nearby_filter {
@@ -56,15 +87,13 @@ sub around_nearby_filter {
 
 sub pin_colour {
     my ( $self, $p, $context ) = @_;
-    return 'grey' if $p->is_closed || ($context ne 'reports' && !$self->owns_problem($p));
-    return 'green' if $p->is_fixed;
-    return 'yellow' if $p->state eq 'confirmed';
-    return 'orange'; # all the other `open_states` like "in progress"
+    return 'grey-cross' if $p->is_closed || ($context ne 'reports' && !$self->owns_problem($p));
+    return 'green-tick' if $p->is_fixed;
+    return 'yellow-cone' if $p->state eq 'confirmed';
+    return 'orange-work'; # all the other `open_states` like "in progress"
 }
 
-sub path_to_pin_icons {
-    return '/cobrands/oxfordshire/images/';
-}
+sub path_to_pin_icons { '/i/pins/whole-shadow-cone-spot/' }
 
 sub admin_user_domain { ( 'buckscc.gov.uk', 'buckinghamshire.gov.uk' ) }
 
@@ -74,6 +103,15 @@ sub admin_pages {
     $pages->{triage} = [ undef, undef ];
     return $pages;
 }
+
+=item admin_templates_state_and_external_status_code
+
+We can set response templates with both state and external status code,
+for updating reports by email.
+
+=cut
+
+sub admin_templates_state_and_external_status_code { 1 }
 
 sub available_permissions {
     my $self = shift;
@@ -103,14 +141,26 @@ sub permission_body_override {
 # Assume that any category change means the report should be resent
 sub category_change_force_resend { 1 }
 
-sub send_questionnaires {
-    return 0;
+sub send_questionnaires { 0 }
+
+=head2 post_report_sent
+
+Bucks have a special 'Littering From Vehicles' category; any reports made in
+that category are automatically set to 'Investigating'.
+
+=cut
+
+sub post_report_sent {
+    my ( $self, $problem ) = @_;
+
+    if ( $problem->category eq VEHICLE_LITTERING_CATEGORY ) {
+        $problem->update( { state => 'investigating' } );
+    }
 }
 
 sub open311_extra_data_exclude { [ 'road-placement' ] }
 
-
-=head2 open311_extra_data_include
+=head2 open311_update_missing_data
 
 All reports sent to Alloy should have a parent asset they're associated with.
 This is indicated by the value in the asset_resource_id field. For certain
@@ -121,11 +171,8 @@ Alloy server and use that as the parent.
 
 =cut
 
-around open311_extra_data_include => sub {
-    my ($orig, $self) = (shift, shift);
-    my $open311_only = $self->$orig(@_);
-
-    my ($row, $h, $contact) = @_;
+sub open311_update_missing_data {
+    my ($self, $row, $h, $contact) = @_;
 
     # If the report doesn't already have an asset, associate it with the
     # closest feature from the Alloy highways network layer.
@@ -136,49 +183,112 @@ around open311_extra_data_include => sub {
             $row->update_extra_field({ name => 'asset_resource_id', value => $item_id });
         }
     }
+}
+
+=head2 open311_extra_data_include
+
+Reports in the "Apply for Access Protection Marking" category have some
+extra field values that we want to append to the report description
+before it's passed to Alloy.
+
+=cut
+
+around open311_extra_data_include => sub {
+    my ($orig, $self) = (shift, shift);
+    my $open311_only = $self->$orig(@_);
+
+    my ($row, $h, $contact) = @_;
+
+    if (my $address = $row->get_extra_field_value('ADDRESS_POSTCODE')) {
+        my $phone = $row->get_extra_field_value('TELEPHONE_NUMBER') || "";
+        for (@$open311_only) {
+            if ($_->{name} eq 'description') {
+                $_->{value} .= "\n\nAddress:\n$address\n\nPhone:\n$phone";
+            }
+        }
+    }
+
+    if ($contact->email =~ /^Abavus/ && $h->{closest_address}) {
+        push @$open311_only, {
+            name => 'closest_address', value => $h->{closest_address}->multiline(5) };
+        $h->{closest_address} = '';
+    }
 
     return $open311_only;
 };
 
+=head2 open311_pre_send
+
+We do not actually want to send claim reports via Open311, though there is a
+backend category for them, only email and Evo by a separate process
+
+=cut
 
 sub open311_pre_send {
     my ($self, $row, $open311) = @_;
-    if ($row->category eq 'Claim') {
-        if ($row->get_extra_metadata('fault_fixed') eq 'Yes') {
-            # We want to send to Confirm, but with slightly altered information
-            $row->update_extra_field({ name => 'title', value => $row->get_extra_metadata('direction') }); # XXX See doc note
-            $row->update_extra_field({ name => 'description', value => $row->get_extra_metadata('describe_cause') });
-        } else {
-            # We do not want to send to Confirm, only email
-            return 'SKIP';
-        }
-    }
+    return 'SKIP' if $row->category eq 'Claim';
 }
 
 sub open311_post_send {
     my ($self, $row, $h) = @_;
 
-    # Check Open311 was successful (or a non-Open311 Claim)
-    my $non_open311_claim = $row->category eq 'Claim' && $row->get_extra_metadata('fault_fixed') ne 'Yes';
-    return unless $row->external_id || $non_open311_claim;
+    $self->_add_claim_auto_response($row, $h) if $row->category eq 'Claim';
+
+    # Check Open311 was successful;
+    return unless $row->external_id;
     return if $row->get_extra_metadata('extra_email_sent');
 
     # For certain categories, send an email also
     my $emails = $self->feature('open311_email');
-    my $addresses = {
-        'Flytipping' => [ email_list($emails->{flytipping}, "TfB") ],
-        'Blocked drain' => [ email_list($emails->{flood}, "Flood Management") ],
-        'Ditch issue' => [ email_list($emails->{flood}, "Flood Management") ],
-        'Flooded subway' => [ email_list($emails->{flood}, "Flood Management") ],
-        'Claim' => [ email_list($emails->{claim}, 'TfB') ],
-    };
-    my $dest = $addresses->{$row->category};
+    my $group = $row->get_extra_metadata('group') || '';
+    my $dest = $emails->{$row->category} || $emails->{$group};
     return unless $dest;
+    $dest = [ email_list($dest->[0], $dest->[1] || 'FixMyStreet') ];
 
     my $sender = FixMyStreet::SendReport::Email->new( to => $dest );
     $sender->send($row, $h);
     if ($sender->success) {
         $row->set_extra_metadata(extra_email_sent => 1);
+    }
+}
+
+sub _add_claim_auto_response {
+    my ($self, $row, $h) = @_;
+
+    my $user = $self->body->comment_user;
+    return unless $user && $row->category eq 'Claim';
+
+    # Attach auto-response template if present
+    my $template = $row->response_templates->search({ 'me.state' => $row->state })->first;
+    my $description = $template->text if $template;
+    if ( $description ) {
+        my $updates = Open311::GetServiceRequestUpdates->new(
+            system_user => $user,
+            current_body => $self->body,
+            blank_updates_permitted => 1,
+        );
+
+        my $request = {
+            service_request_id => $row->id,
+            update_id => 'auto-internal',
+            # Add a second so it is definitely later than problem confirmed timestamp,
+            # which uses current_timestamp (and thus microseconds) whilst this update
+            # is rounded down to the nearest second
+            comment_time => DateTime->now->add( seconds => 1 ),
+            status => 'open',
+            description => $description,
+        };
+        my $update = $updates->process_update($request, $row);
+        my $row_id = $row->id;
+        if ($update) {
+            $h->{update} = {
+                item_text => $update->text,
+                item_extra => $update->get_column('extra'),
+            };
+
+            # Stop any alerts being sent out about this update as included here.
+            $row->cancel_update_alert($update->id);
+        }
     }
 }
 
@@ -193,6 +303,13 @@ sub email_list {
 sub open311_config_updates {
     my ($self, $params) = @_;
     $params->{mark_reopen} = 1;
+}
+
+sub open311_munge_update_params {
+    my ($self, $params, $comment, $body) = @_;
+
+    my $contact = $comment->problem->contact;
+    $params->{service_code} = $contact->email;
 }
 
 sub open311_contact_meta_override {
@@ -247,6 +364,8 @@ sub _dashboard_export_add_columns {
     my ($self, $csv) = @_;
 
     $csv->add_csv_columns( staff_user => 'Staff User' );
+
+    return if $csv->dbi; # staff_user included by default
 
     my $user_lookup = $self->csv_staff_users;
 
@@ -452,7 +571,7 @@ sub _parish_ids {
 }
 
 # Enable adding/editing of parish councils in the admin
-sub add_extra_areas {
+sub add_extra_areas_for_admin {
     my ($self, $areas) = @_;
 
     my $ids_string = join ",", @{ $self->_parish_ids };
@@ -466,27 +585,21 @@ sub add_extra_areas {
     return \%all_areas;
 }
 
-# Make sure CPC areas are included in point lookups for new reports
-sub add_extra_area_types {
-    my ($self, $types) = @_;
-
-    my @types = (
-        @$types,
-        'CPC',
-    );
-    return \@types;
-}
-
 sub is_two_tier { 1 }
 
+=head2 should_skip_sending_update
+
+Only send updates to one particular backend
+
+=cut
+
 sub should_skip_sending_update {
-    my ($self, $update ) = @_;
+    my ($self, $update) = @_;
 
-    # Bucks don't want to receive updates into Confirm that were made by anyone
-    # except the original problem reporter.
-    return $update->user_id != $update->problem->user_id;
+    my $contact = $update->problem->contact || return 1;
+    return 0 if $contact->email =~ /^Abavus/;
+    return 1;
 }
-
 
 =head2 disable_phone_number_entry
 
@@ -580,123 +693,28 @@ sub _lookup_site_name {
     return $self->_nearest_feature($cfg, $x, $y, $features);
 }
 
+sub claim_location {
+    my ($self, $row) = @_;
+
+    my $road = $self->_lookup_site_name($row);
+
+    if (!$road) {
+        return "Unknown location";
+    }
+
+    my $site_name = $road->{properties}->{site_name};
+    $site_name =~ s/([\w']+)/\u\L$1/g;
+    my $area_name = $road->{properties}->{area_name};
+    $area_name =~ s/([\w']+)/\u\L$1/g;
+
+    return "$site_name, $area_name";
+}
+
 around 'munge_sendreport_params' => sub {
     my ($orig, $self, $row, $h, $params) = @_;
 
     # Do not want the user's email to be the Reply-To
     delete $params->{'Reply-To'};
-
-    if ($row->category eq 'Claim') {
-        # Update subject
-        my $type = $row->get_extra_metadata('what');
-        my $name = $row->name;
-        my $road = $self->_lookup_site_name($row);
-        my $site_name = $road->{properties}->{site_name};
-        $site_name =~ s/([\w']+)/\u\L$1/g;
-        my $area_name = $road->{properties}->{area_name};
-        $area_name =~ s/([\w']+)/\u\L$1/g;
-        my $external_id = $row->external_id || $row->get_extra_metadata('report_id') || '(no ID)';
-        my $subject = "New claim - $type - $name - $external_id - $site_name, $area_name";
-        $params->{Subject} = $subject;
-
-        my $user = $self->body->comment_user;
-        if ( $user ) {
-            # Attach auto-response template if present
-            my $template = $row->response_templates->search({ 'me.state' => $row->state })->first;
-            my $description = $template->text if $template;
-            if ( $description ) {
-                my $updates = Open311::GetServiceRequestUpdates->new(
-                    system_user => $user,
-                    current_body => $self->body,
-                    blank_updates_permitted => 1,
-                );
-
-                my $request = {
-                    service_request_id => $row->id,
-                    update_id => 'auto-internal',
-                    # Add a second so it is definitely later than problem confirmed timestamp,
-                    # which uses current_timestamp (and thus microseconds) whilst this update
-                    # is rounded down to the nearest second
-                    comment_time => DateTime->now->add( seconds => 1 ),
-                    status => 'open',
-                    description => $description,
-                };
-                my $update = $updates->process_update($request, $row);
-                if ($update) {
-                    $h->{update} = {
-                        item_text => $update->text,
-                        item_extra => $update->get_column('extra'),
-                    };
-
-                    # Stop any alerts being sent out about this update as included here.
-                    my @alerts = FixMyStreet::DB->resultset('Alert')->search({
-                        alert_type => 'new_updates',
-                        parameter => $row->id,
-                        confirmed => 1,
-                    });
-                    for my $alert (@alerts) {
-                        my $alerts_sent = FixMyStreet::DB->resultset('AlertSent')->find_or_create({
-                            alert_id  => $alert->id,
-                            parameter => $update->id,
-                        });
-                    }
-                }
-            }
-        }
-
-        # Attach photos and documents
-        my @photos = grep { $_ } (
-            $row->photo,
-            $row->get_extra_metadata('vehicle_photos'),
-            $row->get_extra_metadata('property_photos'),
-        );
-        my $photoset = FixMyStreet::App::Model::PhotoSet->new({
-            db_data => join(',', @photos),
-        });
-
-        my $num = $photoset->num_images;
-        my $id = $row->id;
-        my @attachments;
-        foreach (0..$num-1) {
-            my $image = $photoset->get_raw_image($_);
-            push @attachments, {
-                body => $image->{data},
-                attributes => {
-                    filename => "$id.$_." . $image->{extension},
-                    content_type => $image->{content_type},
-                    encoding => 'base64', # quoted-printable ends up with newlines corrupting binary data
-                    name => "$id.$_." . $image->{extension},
-                },
-            };
-        }
-
-        my @files = grep { $_ } (
-            $row->get_extra_metadata('v5'),
-            $row->get_extra_metadata('vehicle_receipts'),
-            $row->get_extra_metadata('tyre_receipts'),
-            $row->get_extra_metadata('property_insurance'),
-            $row->get_extra_metadata('property_invoices'),
-        );
-        foreach (@files) {
-            my $filename = $_->{filenames}[0];
-            my $id = $_->{files};
-            my $dir = FixMyStreet->config('PHOTO_STORAGE_OPTIONS')->{UPLOAD_DIR};
-            $dir = path($dir, "claims_files")->absolute(FixMyStreet->path_to());
-            my $data = path($dir, $id)->slurp_raw;
-            push @attachments, {
-                body => $data,
-                attributes => {
-                    filename => $filename,
-                    #content_type => $image->{content_type},
-                    encoding => 'base64', # quoted-printable ends up with newlines corrupting binary data
-                    name => $filename,
-                },
-            };
-        }
-
-        $params->{_attachments_} = \@attachments;
-        return;
-    }
 
     # The district areas don't exist in MapIt past generation 36, so look up
     # what district this report would have been in and temporarily override
@@ -714,66 +732,20 @@ around 'munge_sendreport_params' => sub {
     $row->areas($original_areas);
 };
 
-sub council_rss_alert_options {
-    my ($self, @args) = @_;
-    my ($options) = super();
-
-    # rename old district councils to 'area' and remove 'ward' from their wards
-    # remove 'County' from Bucks Council name
-    for my $area (@$options) {
-        for my $key (qw(rss_text text)) {
-            $area->{$key} =~ s/District Council/area/ && $area->{$key} =~ s/ ward//;
-            $area->{$key} =~ s/ County//;
-        }
-    }
-
-    return ($options);
-}
-
 sub car_park_wfs_query {
     my ($self, $row) = @_;
-
-    my $uri = URI->new("https://maps.buckscc.gov.uk/arcgis/services/Transport/BC_Car_Parks/MapServer/WFSServer");
-    $uri->query_form(
-        REQUEST => "GetFeature",
-        SERVICE => "WFS",
-        SRSNAME => "urn:ogc:def:crs:EPSG::27700",
-        TYPENAME => "BC_CAR_PARKS",
-        VERSION => "1.1.0",
-        propertyName => 'OBJECTID,Shape',
-    );
-
-    try {
-        return $self->_get($self->_wfs_uri($row, $uri));
-    } catch {
-        # Ignore WFS errors.
-        return {};
-    };
+    my $uri = "https://maps.buckinghamshire.gov.uk/server/services/Transport/Car_Parks/MapServer/WFSServer";
+    return $self->_wfs_post($uri, $row, 'BC_CAR_PARKS', ['OBJECTID', 'Shape']);
 }
 
 sub speed_limit_wfs_query {
     my ($self, $row) = @_;
-
-    my $uri = URI->new("https://maps.buckscc.gov.uk/arcgis/services/Transport/OS_Highways_Speed/MapServer/WFSServer");
-    $uri->query_form(
-        REQUEST => "GetFeature",
-        SERVICE => "WFS",
-        SRSNAME => "urn:ogc:def:crs:EPSG::27700",
-        TYPENAME => "OS_Highways_Speed:CORPGIS.CORPORATE.OS_Highways_Speed",
-        VERSION => "1.1.0",
-        propertyName => 'OBJECTID,Shape,speed',
-    );
-
-    try {
-        return $self->_get($self->_wfs_uri($row, $uri));
-    } catch {
-        # Ignore WFS errors.
-        return {};
-    };
+    my $uri = "https://maps.buckinghamshire.gov.uk/server/services/Transport/OS_Highways_Speed/MapServer/WFSServer";
+    return $self->_wfs_post($uri, $row, 'OS_Highways_Speed:OS_Highways_Speed', ['OBJECTID', 'Shape', 'speed']);
 }
 
-sub _wfs_uri {
-    my ($self, $row, $base_uri) = @_;
+sub _wfs_post {
+    my ($self, $uri, $row, $typename, $properties) = @_;
 
     # This fn may be called before cobrand has been set in the
     # reporting flow and local_coords needs it to be set
@@ -783,33 +755,39 @@ sub _wfs_uri {
     my $buffer = 50; # metres
     my ($w, $s, $e, $n) = ($x-$buffer, $y-$buffer, $x+$buffer, $y+$buffer);
 
-    my $filter = "
-    <ogc:Filter xmlns:ogc=\"http://www.opengis.net/ogc\">
+    $properties = map { "<wfs:PropertyName>$_</wfs:PropertyName>" } @$properties;
+    my $data = <<EOF;
+<wfs:GetFeature service="WFS" version="1.1.0" xmlns:wfs="http://www.opengis.net/wfs">
+  <wfs:Query typeName="$typename">
+    $properties
+    <ogc:Filter xmlns:ogc="http://www.opengis.net/ogc">
         <ogc:BBOX>
             <ogc:PropertyName>Shape</ogc:PropertyName>
-            <gml:Envelope xmlns:gml='http://www.opengis.net/gml' srsName='EPSG:27700'>
+            <gml:Envelope xmlns:gml="http://www.opengis.net/gml" srsName="EPSG:27700">
                 <gml:lowerCorner>$w $s</gml:lowerCorner>
                 <gml:upperCorner>$e $n</gml:upperCorner>
             </gml:Envelope>
         </ogc:BBOX>
-    </ogc:Filter>";
-    $filter =~ s/\n\s+//g;
+    </ogc:Filter>
+  </wfs:Query>
+</wfs:GetFeature>
+EOF
 
-    # URI encodes ' ' as '+' but arcgis wants it to be '%20'
-    # Putting %20 into the filter string doesn't work because URI then escapes
-    # the '%' as '%25' so you get a double encoding issue.
-    #
-    # Avoid all of that and just put the filter on the end of the $base_uri
-    $filter = URI::Escape::uri_escape_utf8($filter);
-
-    return "$base_uri&filter=$filter";
+    try {
+        return $self->_post($uri, $data);
+    } catch {
+        # Ignore WFS errors.
+        return {};
+    };
 }
 
 # Wrapper around LWP::Simple::get to make mocking in tests easier.
-sub _get {
-    my ($self, $uri) = @_;
+sub _post {
+    my ($self, $uri, $data) = @_;
 
-    get($uri);
+    my $ua = LWP::UserAgent->new;
+    my $res = $ua->post($uri, Content_Type => "text/xml", Content => $data);
+    return $res->decoded_content;
 }
 
 around 'report_validation' => sub {
@@ -842,7 +820,7 @@ around 'report_validation' => sub {
 sub munge_contacts_to_bodies {
     my ($self, $contacts, $report) = @_;
 
-    my $parish_cats = [ 'Grass cutting', 'Hedge problem', 'Dirty signs' ];
+    my $parish_cats = [ 'Grass cutting', 'Hedge problem', 'Dirty signs', 'Unauthorised signs' ];
     my %parish_cats = map { $_ => 1 } @$parish_cats;
 
     return unless $parish_cats{$report->category};
@@ -896,7 +874,7 @@ sub owns_problem {
     }
 
     # Want to ignore National Highways here
-    my %areas = map { %{$_->areas} } grep { $_->name !~ /National Highways/ } @bodies;
+    my %areas = map { %{$_->areas} } grep { $_->get_column('name') !~ /National Highways/ } @bodies;
 
     foreach my $area_id ($self->area_ids_for_problems) {
         return 1 if $areas{$area_id};
@@ -972,8 +950,7 @@ sub enter_postcode_text {
 sub lookup_by_ref {
     my ($self, $ref) = @_;
     if (my ($id) = $ref =~ /^\s*(40\d{6})\s*$/) {
-        my $filter = "%T17:confirm_reference,I8:$id,%";
-        return { 'extra' => { -like => $filter } };
+        return { 'extra' => { '@>' => encode_json({ confirm_reference => $id }) } };
     }
     return 0;
 }

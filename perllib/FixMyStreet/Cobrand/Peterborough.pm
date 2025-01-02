@@ -1,3 +1,17 @@
+=head1 NAME
+
+FixMyStreet::Cobrand::Peterborough - code specific to the Peterborough cobrand
+
+=head1 SYNOPSIS
+
+We integrate with Peterborough's Confirm back end.
+We also integrate with Bartec for waste collection services, including bulky
+waste collection.
+
+=head1 DESCRIPTION
+
+=cut
+
 package FixMyStreet::Cobrand::Peterborough;
 use parent 'FixMyStreet::Cobrand::Whitelabel';
 
@@ -5,11 +19,9 @@ use utf8;
 use strict;
 use warnings;
 use DateTime;
-use DateTime::Format::Strptime;
 use Integrations::Bartec;
 use List::Util qw(any);
 use Sort::Key::Natural qw(natkeysort_inplace);
-use FixMyStreet::Email;
 use FixMyStreet::WorkingDays;
 use FixMyStreet::App::Form::Waste::Request::Peterborough;
 use Utils;
@@ -18,19 +30,61 @@ use Moo;
 with 'FixMyStreet::Roles::ConfirmOpen311';
 with 'FixMyStreet::Roles::ConfirmValidation';
 with 'FixMyStreet::Roles::Open311Multi';
-with 'FixMyStreet::Roles::SCP';
+with 'FixMyStreet::Roles::Cobrand::SCP';
+with 'FixMyStreet::Roles::Cobrand::Waste';
+with 'FixMyStreet::Cobrand::Peterborough::Bulky';
+
+=head2 Defaults
+
+=over 4
+
+=cut
 
 sub council_area_id { 2566 }
 sub council_area { 'Peterborough' }
 sub council_name { 'Peterborough City Council' }
 sub council_url { 'peterborough' }
+
+=item * Admin user domain is 'peterborough.gov.uk'
+
+=cut
+
+sub admin_user_domain { "peterborough.gov.uk" }
+
+=item * Default map zoom is set to 5
+
+=cut
+
 sub default_map_zoom { 5 }
+
+=item * We do not send questionnaires
+
+=cut
 
 sub send_questionnaires { 0 }
 
+=item * Max title length is 50
+
+=cut
+
 sub max_title_length { 50 }
 
+=item * Geocoder is OSM
+
+=cut
+
+sub get_geocoder { 'OSM' }
+
+=item * We allow 'display_name' as an extra field on contacts
+
+=back
+
+=cut
+
+sub contact_extra_fields { [ 'display_name' ] }
+
 sub service_name_override {
+    my $self = shift;
     return {
         "Empty Bin 240L Black"      => "Black Bin",
         "Empty Bin 240L Brown"      => "Brown Bin",
@@ -47,13 +101,6 @@ sub service_name_override {
     };
 }
 
-# XXX Use config to set max daily slots etc.
-sub bulky_collection_window_days     {56}
-sub max_bulky_collection_dates       {2}
-sub bulky_workpack_name {
-    qr/Waste-(BULKY WASTE|WHITES)-(?<date_suffix>\d{6})/;
-}
-
 sub disambiguate_location {
     my $self    = shift;
     my $string  = shift;
@@ -65,18 +112,27 @@ sub disambiguate_location {
     };
 }
 
-sub get_geocoder { 'OSM' }
-
-sub contact_extra_fields { [ 'display_name' ] }
-
 sub geocoder_munge_results {
     my ($self, $result) = @_;
     $result->{display_name} = '' unless $result->{display_name} =~ /City of Peterborough/;
     $result->{display_name} =~ s/, UK$//;
+    $result->{display_name} =~ s/, United Kingdom$//;
     $result->{display_name} =~ s/, City of Peterborough, East of England, England//;
+    $result->{display_name} =~ s/, City of Peterborough, Cambridgeshire and Peterborough, England//;
 }
 
-sub admin_user_domain { "peterborough.gov.uk" }
+=head2 (around) open311_update_missing_data
+
+If we have a UPRN (a waste report), we do not need to look up the site code.
+This hooks around the default from Roles::ConfirmOpen311.
+
+=cut
+
+around open311_update_missing_data => sub {
+    my ($orig, $self, $row, $h, $contact) = @_;
+    return if $row->get_extra_field_value('uprn');
+    return $self->$orig($row, $h, $contact);
+};
 
 around open311_extra_data_include => sub {
     my ($orig, $self, $row, $h) = @_;
@@ -89,13 +145,14 @@ around open311_extra_data_include => sub {
         }
     }
     if ( $row->geocode && $row->contact->email =~ /Bartec/ ) {
-        my $address = $row->geocode->{resourceSets}->[0]->{resources}->[0]->{address};
-        my ($number, $street) = $address->{addressLine} =~ /\s*(\d*)\s*(.*)/;
-        push @$open311_only, (
-            { name => 'postcode', value => $address->{postalCode} },
-            { name => 'house_no', value => $number },
-            { name => 'street', value => $street }
-        );
+        my $parts = $row->nearest_address_parts;
+        if ($parts->{number} || $parts->{street} || $parts->{postcode}) {
+            push @$open311_only, (
+                { name => 'postcode', value => $parts->{postcode} },
+                { name => 'house_no', value => $parts->{number} },
+                { name => 'street', value => $parts->{street} }
+            );
+        }
     }
     if ( $row->contact->email =~ /Bartec/ && $row->get_extra_metadata('contributed_by') ) {
         push @$open311_only, (
@@ -112,7 +169,7 @@ sub open311_extra_data_exclude {
     my ($self, $row, $h) = @_;
     # We need to store this as Open311 pre_send needs to check it and it will
     # have been removed due to this function.
-    $row->set_extra_metadata(pcc_witness => $row->get_extra_field_value('pcc-witness'));
+    $self->{cache_pcc_witness} = $row->get_extra_field_value('pcc-witness');
     [ '^PCC-', '^emergency$', '^private_land$', '^extra_detail$' ]
 }
 
@@ -154,10 +211,10 @@ sub should_skip_sending_update {
 }
 
 around 'open311_config' => sub {
-    my ($orig, $self, $row, $h, $params) = @_;
+    my ($orig, $self, $row, $h, $params, $contact) = @_;
 
     $params->{upload_files} = 1;
-    $self->$orig($row, $h, $params);
+    $self->$orig($row, $h, $params, $contact);
 };
 
 sub get_body_sender {
@@ -223,6 +280,7 @@ sub get_body_sender {
         if ( $emails->{flytipping} ) {
             my $contact = $self->SUPER::get_body_sender($body, $problem)->{contact};
             $problem->set_extra_metadata('flytipping_email' => $emails->{flytipping});
+            $self->{cache_flytipping_email} = 1; # This is available in post_report_sent
             return { method => 'Email', contact => $contact};
         }
     }
@@ -241,14 +299,14 @@ sub munge_sendreport_params {
 }
 
 sub _witnessed_general_flytipping {
-    my $row = shift;
-    my $witness = $row->get_extra_metadata('pcc_witness') || '';
+    my ($self, $row) = @_;
+    my $witness = $self->{cache_pcc_witness} || '';
     return ($row->category eq 'General fly tipping' && $witness eq 'yes');
 }
 
 sub open311_pre_send {
     my ($self, $row, $open311) = @_;
-    return 'SKIP' if _witnessed_general_flytipping($row);
+    return 'SKIP' if $self->_witnessed_general_flytipping($row);
 
     # This is a temporary addition to workaround an issue with the bulky goods
     # backend Peterborough are using.
@@ -256,10 +314,6 @@ sub open311_pre_send {
     # manner, we concatenate all relevant details into the report's title field,
     # which is displayed as a service request note in Bartec.
     if ($row->category eq 'Bulky collection') {
-        # We don't want to persist our changes to the DB, so keep a copy
-        # of the original title so it can be restored by open311_post_send.
-        $self->{pboro_original_title} = $row->get_extra_field_value("title");
-
         my $title = "Crew notes: " . ( $row->get_extra_field_value("CREW NOTES") || "" );
         $title .= "\n\nItems:\n";
 
@@ -277,15 +331,8 @@ sub open311_pre_send {
 sub open311_post_send {
     my ($self, $row, $h) = @_;
 
-    if ($row->category eq 'Bulky collection') {
-        # Restore problem's original title before it's stored to DB.
-        $row->update_extra_field({ name => "title", value => $self->{pboro_original_title} });
-    }
-
     # Check Open311 was successful
-    my $send_email = $row->external_id || _witnessed_general_flytipping($row);
-    # Unset here because check above used it
-    $row->unset_extra_metadata('pcc_witness');
+    my $send_email = $row->external_id || $self->_witnessed_general_flytipping($row);
     return unless $send_email;
 
     my $emails = $self->feature('open311_email');
@@ -297,32 +344,17 @@ sub open311_post_send {
     }
 }
 
+sub suppress_report_sent_email {
+    my ($self, $report) = @_;
+    return 1 if $report->category eq 'Bulky cancel' && $report->get_extra_metadata('bulky_amendment_cancel');
+    return 0;
+}
+
 sub post_report_sent {
     my ($self, $problem) = @_;
 
-    if ( $problem->get_extra_metadata('flytipping_email') ) {
-        my @include_path = @{ $self->path_to_web_templates };
-        push @include_path, FixMyStreet->path_to( 'templates', 'web', 'default' );
-        my $tt = FixMyStreet::Template->new({
-            INCLUDE_PATH => \@include_path,
-            disable_autoescape => 1,
-        });
-        my $text;
-        $tt->process('report/new/flytipping_text.html', {}, \$text);
-
-        $problem->unset_extra_metadata('flytipping_email');
-        $problem->update({
-            state => 'closed'
-        });
-        FixMyStreet::DB->resultset('Comment')->create({
-            user_id => $self->body->comment_user_id,
-            problem => $problem,
-            state => 'confirmed',
-            cobrand => $problem->cobrand,
-            cobrand_data => '',
-            problem_state => 'closed',
-            text => $text,
-        });
+    if ( $self->{cache_flytipping_email} ) {
+        $self->_post_report_sent_close($problem, 'report/new/flytipping_text.html');
     }
 }
 
@@ -349,7 +381,7 @@ sub _fetch_features_url {
 sub dashboard_export_problems_add_columns {
     my ($self, $csv) = @_;
 
-    my @contacts = $csv->body->contacts->search(undef, { order_by => [ 'category' ] } )->all;
+    my @contacts = $csv->body->contacts->order_by('category')->all;
     my %extra_columns;
     foreach my $contact (@contacts) {
         foreach (@{$contact->get_metadata_for_storage}) {
@@ -368,17 +400,39 @@ sub dashboard_export_problems_add_columns {
         @extra_columns,
     );
 
+    if ($csv->dbi) {
+        $csv->csv_extra_data(sub {
+            my $report = shift;
+
+            my $addr = FixMyStreet::Geocode::Address->new($report->{geocode});
+            my $address = $addr->summary;
+            my $ext_code = $csv->_extra_metadata($report, 'external_status_code');
+            my $state = FixMyStreet::DB->resultset("State")->display($report->{state});
+            my $extra = {
+                nearest_address => $address,
+                external_status_code => $ext_code,
+                state => $state,
+                db_state => $report->{state},
+            };
+
+            foreach (@{$csv->_extra_field($report)}) {
+                $extra->{usrn} = $_->{value} if $_->{name} eq 'site_code';
+                $extra->{"extra.$_->{name}"} = $_->{value} if $_->{name} =~ /^PCC-/i;
+            }
+
+            return $extra;
+        });
+        return;
+    }
+
     my $user_lookup = $self->csv_staff_users;
 
     $csv->csv_extra_data(sub {
         my $report = shift;
 
-        my $address = '';
-        $address = $report->geocode->{resourceSets}->[0]->{resources}->[0]->{name}
-            if $report->geocode;
-
+        my $address = $report->nearest_address(1);
         my $staff_user = $self->csv_staff_user_lookup($report->get_extra_metadata('contributed_by'), $user_lookup);
-        my $ext_code = $report->get_extra_metadata('external_status_code');
+        my $ext_code = $csv->_extra_metadata($report, 'external_status_code');
         my $state = FixMyStreet::DB->resultset("State")->display($report->state);
         my $extra = {
             nearest_address => $address,
@@ -388,7 +442,7 @@ sub dashboard_export_problems_add_columns {
             state => $state,
         };
 
-        foreach (@{$report->get_extra_fields}) {
+        foreach (@{$csv->_extra_field($report)}) {
             $extra->{usrn} = $_->{value} if $_->{name} eq 'site_code';
             $extra->{"extra.$_->{name}"} = $_->{value} if $_->{name} =~ /^PCC-/i;
         }
@@ -441,34 +495,35 @@ sub _premises_for_postcode {
 
     my $key = "peterborough:bartec:premises_for_postcode:$pc";
 
-    unless ( $c->session->{$key} ) {
-        my $cfg = $self->feature('bartec');
-        my $bartec = Integrations::Bartec->new(%$cfg);
-        my $response = $bartec->Premises_Get($pc);
+    my $data = $c->waste_cache_get($key);
+    return $data if $data;
 
-        if (!$c->user_exists || !($c->user->from_body || $c->user->is_superuser)) {
-            my $blocked = $cfg->{blocked_uprns} || [];
-            my %blocked = map { $_ => 1 } @$blocked;
-            @$response = grep { !$blocked{$_->{UPRN}} } @$response;
-        }
+    my $cfg = $self->feature('bartec');
+    my $bartec = Integrations::Bartec->new(%$cfg);
+    my $response = $bartec->Premises_Get($pc);
 
-        $c->session->{$key} = [ map { {
-            id => $pc . ":" . $_->{UPRN},
-            uprn => $_->{UPRN},
-            usrn => $_->{USRN},
-            address => $self->_format_address($_),
-            latitude => $_->{Location}->{Metric}->{Latitude},
-            longitude => $_->{Location}->{Metric}->{Longitude},
-        } } @$response ];
+    if (!$c->user_exists || !($c->user->from_body || $c->user->is_superuser)) {
+        my $blocked = $cfg->{blocked_uprns} || [];
+        my %blocked = map { $_ => 1 } @$blocked;
+        @$response = grep { !$blocked{$_->{UPRN}} } @$response;
     }
 
-    return $c->session->{$key};
+    $data = [ map { {
+        id => $pc . ":" . $_->{UPRN},
+        uprn => $_->{UPRN},
+        usrn => $_->{USRN},
+        address => $self->_format_address($_),
+        latitude => $_->{Location}->{Metric}->{Latitude},
+        longitude => $_->{Location}->{Metric}->{Longitude},
+    } } @$response ];
+
+    return $c->waste_cache_set($key, $data);
 }
 
 sub clear_cached_lookups_postcode {
     my ($self, $pc) = @_;
     my $key = "peterborough:bartec:premises_for_postcode:$pc";
-    delete $self->{c}->session->{$key};
+    $self->{c}->waste_cache_delete($key);
 }
 
 sub clear_cached_lookups_property {
@@ -477,8 +532,8 @@ sub clear_cached_lookups_property {
     # might be prefixed with postcode if it's come straight from the URL
     $uprn =~ s/^.+\://g;
 
-    foreach ( qw/look_up_property bin_services_for_address/ ) {
-        delete $self->{c}->session->{"peterborough:bartec:$_:$uprn"};
+    foreach ( qw/bin_services_for_address/ ) {
+        $self->{c}->waste_cache_delete("peterborough:bartec:$_:$uprn");
     }
 
     $self->clear_cached_lookups_bulky_slots($uprn);
@@ -487,9 +542,11 @@ sub clear_cached_lookups_property {
 sub clear_cached_lookups_bulky_slots {
     my ($self, $uprn) = @_;
 
+    # might be prefixed with postcode
+    $uprn =~ s/^.+\://g;
+
     for (qw/earlier later/) {
-        delete $self->{c}
-            ->session->{"peterborough:bartec:available_bulky_slots:$_:$uprn"};
+        $self->{c}->waste_cache_delete("peterborough:bartec:available_bulky_slots:$_:$uprn");
     }
 }
 
@@ -522,69 +579,12 @@ sub construct_bin_date {
 sub look_up_property {
     my $self = shift;
     my $id = shift;
-
     return unless $id;
 
     my ($pc, $uprn) = split ":", $id;
-
     my $premises = $self->_premises_for_postcode($pc);
-
     my %premises = map { $_->{uprn} => $_ } @$premises;
-
-    $premises{$uprn}{pending_bulky_collection}
-        = $self->find_pending_bulky_collection( $premises{$uprn} );
-
     return $premises{$uprn};
-}
-
-# Should only be a single open collection for a given property, but in case
-# there isn't, return the most recent
-sub find_pending_bulky_collection {
-    my ( $self, $property ) = @_;
-
-    return FixMyStreet::DB->resultset('Problem')->to_body( $self->body )
-        ->find(
-        {   category => 'Bulky collection',
-            extra    => {
-                      like => '%T4:uprn,T5:value,I'
-                    . length( $property->{uprn} ) . ':'
-                    . $property->{uprn} . '%',
-            },
-            state =>
-                { '=', [ FixMyStreet::DB::Result::Problem->open_states ] },
-        },
-        { order_by => { -desc => 'id' } },
-        );
-}
-
-sub bulky_can_view_collection {
-    my ( $self, $p ) = @_;
-
-    my $c = $self->{c};
-
-    # logged out users can't see anything
-    return unless $p && $c->user_exists;
-
-    # superusers and staff can see it
-    # XXX do we want a permission for this?
-    return 1 if $c->user->is_superuser || $c->user->belongs_to_body($self->body->id);
-
-    # otherwise only the person who booked the collection can view
-    return $c->user->id == $p->user_id;
-}
-
-sub bulky_can_view_cancellation {
-    my ( $self, $p ) = @_;
-
-    my $c = $self->{c};
-
-    return unless $p && $c->user_exists;
-
-    # Staff only
-    # XXX do we want a permission for this?
-    return 1
-        if $c->user->is_superuser
-        || $c->user->belongs_to_body( $self->body->id );
 }
 
 sub image_for_unit {
@@ -592,323 +592,12 @@ sub image_for_unit {
     my $service_id = $unit->{service_id};
     my $base = '/i/waste-containers';
     my $images = {
-        6533 => "$base/bin-black",
-        6534 => "$base/bin-green",
-        6579 => "$base/bin-brown",
+        6533 => svg_container_bin('wheelie', '#333333'),
+        6534 => svg_container_bin("wheelie", '#41B28A'),
+        6579 => svg_container_bin("wheelie", '#8B5E3D'),
+        bulky => "$base/bulky-white",
     };
     return $images->{$service_id};
-}
-
-# XXX
-# Error handling
-# Holidays, bank holidays?
-# Monday limit, Tuesday limit etc.?
-# Check which bulky collections are pending, open
-sub find_available_bulky_slots {
-    my ( $self, $property, $last_earlier_date_str ) = @_;
-
-    my $key
-        = 'peterborough:bartec:available_bulky_slots:'
-        . ( $last_earlier_date_str ? 'later' : 'earlier' ) . ':'
-        . $property->{uprn};
-    return $self->{c}->session->{$key} if $self->{c}->session->{$key};
-
-    my $bartec = $self->feature('bartec');
-    $bartec = Integrations::Bartec->new(%$bartec);
-
-    my $window = _bulky_collection_window($last_earlier_date_str);
-    if ( $window->{error} ) {
-        # XXX Handle error gracefully
-        die $window->{error};
-    }
-    my $workpacks = $bartec->Premises_FutureWorkpacks_Get(
-        date_from => $window->{date_from},
-        date_to   => $window->{date_to},
-        uprn      => $property->{uprn},
-    );
-
-    my @available_slots;
-
-    my $last_workpack_date;
-    for my $workpack (@$workpacks) {
-        # Depending on the Collective API version (R1531 or R1611),
-        # $workpack->{Actions} can be an arrayref or a hashref.
-        # If a hashref, it may be an action structure of the form
-        # { 'ActionName' => ... },
-        # or it may have the key {Action}.
-        # $workpack->{Actions}{Action} can also be an arrayref or hashref.
-        # From this variety of structures, we want to get an arrayref of
-        # action hashrefs of the form [ { 'ActionName' => ... }, {...} ].
-        my $action_data = $workpack->{Actions};
-        if ( ref $action_data eq 'HASH' ) {
-            if ( exists $action_data->{Action} ) {
-                $action_data = $action_data->{Action};
-                $action_data = [$action_data] if ref $action_data eq 'HASH';
-            } else {
-                $action_data = [$action_data];
-            }
-        }
-
-        my %action_hash = map {
-            my $action_name = $_->{ActionName} // '';
-            $action_name = service_name_override()->{$action_name}
-                // $action_name;
-
-            $action_name => $_;
-        } @$action_data;
-
-        # We only want dates that coincide with black bin collections
-        next if !exists $action_hash{'Black Bin'};
-
-        # This case shouldn't occur, but in case there are multiple black bin
-        # workpacks for the same date, we only take the first into account
-        next if $workpack->{WorkPackDate} eq ( $last_workpack_date // '' );
-
-        # Only include if max jobs not already reached
-        push @available_slots => {
-            workpack_id => $workpack->{id},
-            date        => $workpack->{WorkPackDate},
-            }
-            if $self->check_bulky_slot_available( $workpack->{WorkPackDate},
-            $bartec );
-
-        $last_workpack_date = $workpack->{WorkPackDate};
-
-        # Provision of $last_earlier_date_str implies we want to fetch all
-        # remaining available slots in the given window, so we ignore the
-        # limit
-        last
-            if !$last_earlier_date_str
-            && @available_slots == max_bulky_collection_dates();
-    }
-
-    $self->{c}->session->{$key} = \@available_slots;
-
-    return \@available_slots;
-}
-
-# Checks if there is a slot available for a given date
-sub check_bulky_slot_available {
-    my ( $self, $date, $bartec ) = @_;
-
-    unless ($bartec) {
-        $bartec = $self->feature('bartec');
-        $bartec = Integrations::Bartec->new(%$bartec);
-    }
-
-    my $suffix_date_parser = DateTime::Format::Strptime->new( pattern => '%d%m%y' );
-    my $workpack_date_pattern = '%FT%T';
-    my $workpack_dt
-        = DateTime::Format::Strptime->new( pattern => $workpack_date_pattern )
-        ->parse_datetime($date);
-    next unless $workpack_dt;
-
-    my $date_from
-        = $workpack_dt->clone->set( hour => 0, minute => 0, second => 0 )
-        ->strftime($workpack_date_pattern);
-    my $date_to = $workpack_dt->clone->set(
-        hour   => 23,
-        minute => 59,
-        second => 59,
-    )->strftime($workpack_date_pattern);
-    my $workpacks_for_day = $bartec->WorkPacks_Get(
-        date_from => $date_from,
-        date_to   => $date_to,
-    );
-
-    my %jobs_per_uprn;
-    for my $wpfd (@$workpacks_for_day) {
-        next if $wpfd->{Name} !~ bulky_workpack_name();
-
-        # Ignore workpacks with names with faulty date suffixes
-        my $suffix_dt = $suffix_date_parser->parse_datetime( $+{date_suffix} );
-
-        next
-            if !$suffix_dt
-            || $workpack_dt->date ne $suffix_dt->date;
-
-        my $jobs = $bartec->Jobs_Get_for_workpack( $wpfd->{ID} ) || [];
-
-        # Group jobs by UPRN. For a bulky workpack, a UPRN/premises may
-        # have multiple jobs (equivalent to item slots); these all count
-        # as a single bulky collection slot.
-        $jobs_per_uprn{ $_->{Job}{UPRN} }++ for @$jobs;
-    }
-
-    my $total_collection_slots = keys %jobs_per_uprn;
-
-    return $total_collection_slots < $self->bulky_daily_slots;
-}
-
-sub _bulky_collection_window {
-    my $last_earlier_date_str = shift;
-    my $fmt = '%F';
-
-    my $now = DateTime->now( time_zone => FixMyStreet->local_time_zone );
-    my $tomorrow = $now->clone->truncate( to => 'day' )->add( days => 1 );
-
-    my $start_date;
-    if ($last_earlier_date_str) {
-        $start_date
-            = DateTime::Format::Strptime->new( pattern => $fmt )
-            ->parse_datetime($last_earlier_date_str);
-
-        return { error => 'Invalid date provided' } unless $start_date;
-
-        $start_date->add( days => 1 );
-    } else {
-        $start_date = $tomorrow->clone;
-        # Can only book the next day up to 3pm
-        if ($now->hour >= 15) {
-            $start_date->add( days => 1 );
-        }
-    }
-
-    my $date_to
-        = $tomorrow->clone->add( days => bulky_collection_window_days() );
-
-    return {
-        date_from => $start_date->strftime($fmt),
-        date_to => $date_to->strftime($fmt),
-    };
-}
-
-has wasteworks_config => (
-    is => 'lazy',
-    default => sub { $_[0]->body->get_extra_metadata( 'wasteworks_config', {} ) },
-);
-
-sub bulky_items_master_list { $_[0]->wasteworks_config->{item_list} || [] }
-sub bulky_items_maximum { $_[0]->wasteworks_config->{items_per_collection_max} || 5 }
-sub bulky_daily_slots { $_[0]->wasteworks_config->{daily_slots} || 40 }
-
-sub bulky_per_item_costs {
-    my $self = shift;
-    my $cfg  = $self->body->get_extra_metadata( 'wasteworks_config', {} );
-    return $cfg->{per_item_costs};
-}
-
-sub bulky_can_cancel_collection {
-    # There is an $ignore_external_id option because we display some
-    # cancellation messaging without needing a report in Bartec
-    my ( $self, $collection, $ignore_external_id ) = @_;
-
-    return
-           $collection
-        && $collection->is_open
-        && ( $collection->external_id || $ignore_external_id )
-        && $self->bulky_can_view_collection($collection)
-        && $self->within_bulky_cancel_window($collection);
-}
-
-sub bulky_cancellation_report {
-    my ( $self, $collection ) = @_;
-
-    return unless $collection && $collection->external_id;
-
-    my $original_sr_number = $collection->external_id =~ s/Bartec-//r;
-
-    # A cancelled collection will have a corresponding cancellation report
-    # linked via external_id / ORIGINAL_SR_NUMBER
-    return FixMyStreet::DB->resultset('Problem')->find(
-        {   extra => {
-                      like => '%T18:ORIGINAL_SR_NUMBER,T5:value,T'
-                    . length($original_sr_number) . ':'
-                    . $original_sr_number . '%',
-            },
-        },
-    );
-}
-
-sub bulky_can_refund {
-    my $self = shift;
-    my $c    = $self->{c};
-
-    # Skip refund eligibility check for bulky goods soft launch; just
-    # assume if a collection can be cancelled, it can be refunded
-    # (see https://3.basecamp.com/4020879/buckets/26662378/todos/5870058641)
-    return $self->within_bulky_cancel_window
-        if $self->bulky_enabled_staff_only;
-
-    return $c->stash->{property}{pending_bulky_collection}
-        ->get_extra_field_value('CHARGEABLE') ne 'FREE'
-        && $self->within_bulky_refund_window;
-}
-
-# Collections are scheduled to begin at 06:45 each day.
-# A cancellation made less than 24 hours before the collection is scheduled to
-# begin is not entitled to a refund.
-sub within_bulky_refund_window {
-    my $self = shift;
-    my $c    = $self->{c};
-
-    my $open_collection = $c->stash->{property}{pending_bulky_collection};
-    return 0 unless $open_collection;
-
-    my $now_dt = DateTime->now( time_zone => FixMyStreet->local_time_zone );
-
-    my $collection_date_str = $open_collection->get_extra_field_value('DATE');
-    my $collection_dt       = DateTime::Format::Strptime->new(
-        pattern   => '%FT%T',
-        time_zone => FixMyStreet->local_time_zone,
-    )->parse_datetime($collection_date_str);
-
-    return $self->_check_within_bulky_refund_window( $now_dt,
-        $collection_dt );
-}
-
-sub _check_within_bulky_refund_window {
-    my ( undef, $now_dt, $collection_dt ) = @_;
-
-    my $cutoff_dt = $collection_dt->clone->set( hour => 6, minute => 45 )
-        ->subtract( hours => 24 );
-
-    return $now_dt <= $cutoff_dt;
-}
-
-sub within_bulky_cancel_window {
-    my ( $self, $collection ) = @_;
-
-    my $c = $self->{c};
-    $collection //= $c->stash->{property}{pending_bulky_collection};
-    return 0 unless $collection;
-
-    my $now_dt = DateTime->now( time_zone => FixMyStreet->local_time_zone );
-
-    my $collection_date_str = $collection->get_extra_field_value('DATE');
-    my $collection_dt       = DateTime::Format::Strptime->new(
-        pattern   => '%FT%T',
-        time_zone => FixMyStreet->local_time_zone,
-    )->parse_datetime($collection_date_str);
-
-    return $self->_check_within_bulky_cancel_window( $now_dt,
-        $collection_dt );
-}
-
-sub _check_within_bulky_cancel_window {
-    my ( undef, $now_dt, $collection_dt ) = @_;
-
-    # 23:55 day before collection
-    my $cutoff_dt = $collection_dt->clone->subtract( minutes => 5 );
-    return $now_dt < $cutoff_dt;
-}
-
-sub unset_free_bulky_used {
-    my $self = shift;
-
-    my $c = $self->{c};
-
-    return
-        unless $c->stash->{property}{pending_bulky_collection}
-        ->get_extra_field_value('CHARGEABLE') eq 'FREE';
-
-    my $bartec = $self->feature('bartec');
-    $bartec = Integrations::Bartec->new(%$bartec);
-
-    # XXX At the time of writing, there does not seem to be a
-    # 'FREE BULKY USED' attribute defined in Bartec
-    $bartec->delete_premise_attribute( $c->stash->{property}{uprn},
-        'FREE BULKY USED' );
 }
 
 sub bin_services_for_address {
@@ -1000,17 +689,6 @@ sub bin_services_for_address {
     my $async = $self->{c}->action eq 'waste/bin_days' && $self->{c}->req->method eq 'GET';
 
     my $results = $bartec->call_api($self->{c}, 'peterborough', 'bin_services_for_address:' . $uprn, $async, @calls);
-    if (!$results) {
-        # Need to set the custom template here because Waste::bin_days
-        # doesn't actually get run because of the detach
-        # XXX This can be removed when the bulky template is removed
-        if ( $self->bulky_enabled ) {
-            $self->{c}->stash->{template} = 'waste/bin_days_bulky.html';
-        }
-        $self->{c}->stash->{data_loading} = 1;
-        $self->{c}->stash->{page_refresh} = 2;
-        $self->{c}->detach;
-    }
 
     my $jobs = $results->{"Jobs_Get $uprn"};
     my $schedules = $results->{"Features_Schedules_Get $uprn"};
@@ -1069,6 +747,7 @@ sub bin_services_for_address {
     my %seen_containers;
 
     my $now = DateTime->now->set_time_zone(FixMyStreet->local_time_zone);
+
     foreach (@$job_dates) {
         my $last = construct_bin_date($_->{PreviousDate});
         my $next = construct_bin_date($_->{NextDate});
@@ -1086,6 +765,10 @@ sub bin_services_for_address {
         my @request_service_ids_open = grep { $open_requests->{$_} || $open_requests->{425} || ($_ == 419 && $open_requests->{422}) } @$request_service_ids;
 
         my %requests_open = map { $_ => 1 } @request_service_ids_open;
+
+        if ( $container_id == 6533 ) {    # Black bin
+            $property->{has_black_bin} = 1;
+        }
 
         my $last_obj = { date => $last, ordinal => ordinal($last->day) } if $last;
         my $next_obj = { date => $next, ordinal => ordinal($next->day) } if $next;
@@ -1119,7 +802,7 @@ sub bin_services_for_address {
             # If on the day, but before 5pm, show a special message to call
             # (which is slightly different for staff, who are actually allowed to report)
             if ($last->ymd eq $now->ymd && $now->hour < 17) {
-                my $is_staff = $self->{c}->user_exists && $self->{c}->user->from_body && $self->{c}->user->from_body->name eq "Peterborough City Council";
+                my $is_staff = $self->{c}->user_exists && $self->{c}->user->from_body && $self->{c}->user->from_body->get_column('name') eq "Peterborough City Council";
                 $row->{report_allowed} = $is_staff ? 1 : 0;
                 $row->{report_locked_out} = [ "ON DAY PRE 5PM" ];
                 # Set a global flag to show things in the sidebar
@@ -1141,6 +824,8 @@ sub bin_services_for_address {
         }
         push @out, $row;
     }
+
+    $property->{show_bulky_waste} = $self->bulky_allowed_property($property);
 
     # Some need to be added manually as they don't appear in Bartec responses
     # as they're not "real" collection types (e.g. requesting all bins)
@@ -1194,23 +879,28 @@ sub relevant_jobs {
     my %schedules = map { $_->{JobName} => $_ } @$schedules;
     my @jobs = grep {
         my $name = $_->{JobName};
-        $schedules{$name}->{Feature}->{Status}->{Name} eq 'IN SERVICE'
+        my $schedule_name = $schedules{$name}->{Feature}->{Status}->{Name} || '';
+        $schedule_name eq 'IN SERVICE'
         && $schedules{$name}->{Feature}->{FeatureType}->{ID} != 6815;
     } @$jobs;
     return \@jobs;
 }
 
+=pod
+
+Missed bins can be reported up until 4pm the working day following the last
+collection day. So a bin not collected on Tuesday can be rung through up to
+4pm on Wednesday, and one not collected on Friday can be rung through up to
+4pm Monday.
+
+=cut
+
 sub _waste_report_allowed {
     my ($self, $dt) = @_;
 
-    # missed bin reports are allowed if we're within 1.5 working days of the last collection day
-    # e.g.:
-    #  A bin not collected on Tuesday can be rung through up to noon Thursday
-    #  A bin not collected on Thursday can be rung through up to noon Monday
-
     my $wd = FixMyStreet::WorkingDays->new(public_holidays => FixMyStreet::Cobrand::UK::public_holidays());
     $dt = $wd->add_days($dt, 1);
-    $dt->set( hour => 12, minute => 0, second => 0 );
+    $dt->set( hour => 16, minute => 0, second => 0 );
     my $now = DateTime->now->set_time_zone(FixMyStreet->local_time_zone);
     return $now <= $dt;
 }
@@ -1311,7 +1001,6 @@ sub waste_munge_request_data {
     my $reason = $data->{request_reason} || '';
 
     $reason = {
-        cracked => "Cracked bin\n\nPlease remove cracked bin.",
         lost_stolen => 'Lost/stolen bin',
         new_build => 'New build',
         other_staff => '(Other - PD STAFF)',
@@ -1326,103 +1015,6 @@ sub waste_munge_request_data {
     }
 
     $data->{category} = $self->body->contacts->find({ email => "Bartec-$id" })->category;
-}
-
-sub waste_munge_bulky_data {
-    my ($self, $data) = @_;
-
-    my $c = $self->{c};
-
-    $data->{title} = "Bulky goods collection";
-    $data->{detail} = "Address: " . $c->stash->{property}->{address};
-    $data->{category} = "Bulky collection";
-    $data->{extra_DATE} = $data->{chosen_date};
-
-    my $max = $self->bulky_items_maximum;
-    for (1..$max) {
-        my $two = sprintf("%02d", $_);
-        $data->{"extra_ITEM_$two"} = $data->{"item_$_"};
-    }
-
-    $self->bulky_total_cost($data);
-
-    $data->{"extra_CREW NOTES"} = $data->{location};
-}
-
-sub waste_reconstruct_bulky_data {
-    my ($self, $p) = @_;
-
-    my $saved_data = {
-        "chosen_date" => $p->get_extra_field_value('DATE'),
-        "location" => $p->get_extra_field_value('CREW NOTES'),
-        "location_photo" => $p->get_extra_metadata("location_photo"),
-    };
-    my @fields = grep { $_->{name} =~ /ITEM_/ } @{$p->get_extra_fields};
-    foreach (@fields) {
-        my ($id) = $_->{name} =~ /ITEM_(\d+)/;
-        $saved_data->{"item_" . ($id+0)} = $_->{value};
-        $saved_data->{"item_photo_" . ($id+0)} = $p->get_extra_metadata("item_photo_" . ($id+0));
-    }
-
-    return $saved_data;
-}
-
-sub bulky_free_collection_available {
-    my $self = shift;
-    my $c = $self->{c};
-
-    my $cfg = $self->wasteworks_config;
-
-    my $attributes = $c->stash->{property}->{attributes};
-    my $free_collection_available = !$attributes->{'FREE BULKY USED'};
-
-    return $cfg->{free_mode} && $free_collection_available;
-}
-
-# For displaying before user books collection. In the case of individually
-# priced items, we cannot know what the total cost will be, so we return the
-# lowest cost.
-sub bulky_minimum_cost {
-    my $self = shift;
-
-    my $cfg = $self->wasteworks_config;
-
-    if ( $cfg->{per_item_costs} ) {
-        # Get the item with the lowest cost
-        my @sorted = sort { $a <=> $b }
-            map { $_->{price} } @{ $self->bulky_items_master_list };
-
-        return $sorted[0] // 0;
-    } else {
-        return $cfg->{base_price} // 0;
-    }
-}
-
-sub bulky_total_cost {
-    my ($self, $data) = @_;
-    my $c = $self->{c};
-
-    if ($self->bulky_free_collection_available) {
-        $data->{extra_CHARGEABLE} = 'FREE';
-        $c->stash->{payment} = 0;
-    } else {
-        $data->{extra_CHARGEABLE} = 'CHARGED';
-
-        my $cfg = $self->wasteworks_config;
-        if ($cfg->{per_item_costs}) {
-            my %prices = map { $_->{name} => $_->{price} } @{ $self->bulky_items_master_list };
-            my $total = 0;
-            for (1..5) {
-                my $item = $data->{"item_$_"} or next;
-                $total += $prices{$item};
-            }
-            $c->stash->{payment} = $total;
-        } else {
-            $c->stash->{payment} = $cfg->{base_price};
-        }
-        $data->{"extra_payment_method"} = "credit_card";
-    }
-    return $c->stash->{payment};
 }
 
 sub waste_cc_payment_line_item_ref {
@@ -1487,22 +1079,6 @@ sub open311_contact_meta_override {
             automated => 'hidden_field',
         };
     }
-}
-
-sub waste_munge_bulky_cancellation_data {
-    my ( $self, $data ) = @_;
-
-    my $c = $self->{c};
-    my $collection_report = $c->stash->{property}{pending_bulky_collection};
-
-    $data->{title}    = 'Bulky goods cancellation';
-    $data->{category} = 'Bulky cancel';
-    $data->{detail} .= " | Original report ID: " . $collection_report->id;
-
-    $c->set_param( 'COMMENTS', 'Cancellation at user request' );
-
-    my $original_sr_number = $collection_report->external_id =~ s/Bartec-//r;
-    $c->set_param( 'ORIGINAL_SR_NUMBER', $original_sr_number );
 }
 
 sub waste_munge_report_data {
@@ -1573,17 +1149,9 @@ sub waste_munge_problem_data {
 
     my $bin = $c->stash->{containers}{$container_id};
     $data->{category} = $category;
-    if ($category_verbose =~ /cracked/) {
-        my $address = $c->stash->{property}->{address};
-        $data->{title} = "Request new $bin";
-        $data->{detail} = "Quantity: 1\n\n$address";
-        $data->{detail} .= "\n\nReason: Cracked bin\n\nPlease remove cracked bin.";
-    } else {
-        $data->{title} = $category =~ /Lid|Wheels/ ? "Damaged $bin bin" :
-                         $category =~ /Not returned/ ? "Bin not returned" : $bin;
-        $data->{detail} = "$category_verbose\n\n" . $c->stash->{property}->{address};
-    }
-
+    $data->{title} = $category =~ /Lid|Wheels/ ? "Damaged $bin bin" :
+                    $category =~ /Not returned/ ? "Bin not returned" : $bin;
+    $data->{detail} = "$category_verbose\n\n" . $c->stash->{property}->{address};
     if ( $data->{extra_detail} ) {
         $data->{detail} .= "\n\nExtra detail: " . $data->{extra_detail};
     }
@@ -1592,8 +1160,8 @@ sub waste_munge_problem_data {
 sub waste_munge_problem_form_fields {
     my ($self, $field_list) = @_;
 
-    my $not_staff = !($self->{c}->user_exists && $self->{c}->user->from_body && $self->{c}->user->from_body->name eq "Peterborough City Council");
-    my $label_497 = $not_staff 
+    my $not_staff = !($self->{c}->user_exists && $self->{c}->user->from_body && $self->{c}->user->from_body->get_column('name') eq "Peterborough City Council");
+    my $label_497 = $not_staff
     ? 'The bin wasn’t returned to the collection point (Please phone 01733 747474 to report this issue)'
     : 'The bin wasn’t returned to the collection point';
 
@@ -1608,11 +1176,6 @@ sub waste_munge_problem_form_fields {
             container_name => "Black bin",
             label => "The bin’s wheels are damaged",
         },
-        419 => {
-            container => 6533,
-            container_name => "Black bin",
-            label => "The bin is cracked",
-        },
         537 => {
             container => 6534,
             container_name => "Green bin",
@@ -1622,11 +1185,6 @@ sub waste_munge_problem_form_fields {
             container => 6534,
             container_name => "Green bin",
             label => "The bin’s wheels are damaged",
-        },
-        420 => {
-            container => 6534,
-            container_name => "Green bin",
-            label => "The bin is cracked",
         },
         539 => {
             container => 6579,
@@ -1704,10 +1262,9 @@ sub waste_munge_problem_form_fields {
 
 }
 
+sub waste_request_form_first_title { 'Which bins do you need?' }
 sub waste_request_form_first_next {
     my $self = shift;
-    $self->{c}->stash->{form_class} = 'FixMyStreet::App::Form::Waste::Request::Peterborough';
-    $self->{c}->stash->{form_title} = 'Which bins do you need?';
     return 'replacement' unless $self->{c}->get_param('bags_only');
     return 'about_you';
 }
@@ -1722,173 +1279,30 @@ sub _format_address {
 
 sub bin_day_format { '%A, %-d~~~ %B %Y' }
 
-sub available_permissions {
-    my $self = shift;
+sub bulky_refund_collection {
+    my ($self, $collection_report) = @_;
+    my $c = $self->{c};
+    $c->send_email(
+        'waste/bulky-refund-request.txt',
+        {   to => [
+                [ $c->cobrand->contact_email, $c->cobrand->council_name ]
+            ],
 
-    my $perms = $self->next::method();
-
-    my $features = $self->feature('waste_features') || {};
-    if ( $features->{admin_config_enabled} ) {
-        $perms->{Waste}->{wasteworks_config} = "Can edit WasteWorks configuration";
-    }
-
-    return $perms;
-}
-
-sub bulky_enabled {
-    my $self = shift;
-
-    # $self->{c} is undefined if this cobrand was instantiated by
-    # get_cobrand_handler instead of being the current active cobrand
-    # for this request.
-    my $c = $self->{c} || FixMyStreet::DB->schema->cobrand->{c};
-
-    my $cfg = $self->feature('waste_features') || {};
-
-    if ($self->bulky_enabled_staff_only) {
-        return $c->user_exists && (
-            $c->user->is_superuser
-            || ( $c->user->from_body && $c->user->from_body->name eq $self->council_name)
-        );
-    } else {
-        return $cfg->{bulky_enabled};
-    }
-}
-
-sub bulky_enabled_staff_only {
-    my $self = shift;
-
-    my $cfg = $self->feature('waste_features') || {};
-
-    return $cfg->{bulky_enabled} && $cfg->{bulky_enabled} eq 'staff';
-}
-
-sub bulky_available_feature_types {
-    my $self = shift;
-
-    return unless $self->bulky_enabled;
-
-    my $cfg = $self->feature('bartec');
-    my $bartec = Integrations::Bartec->new(%$cfg);
-    my @types = @{ $bartec->Features_Types_Get() };
-
-    # Limit to the feature types that are for bulky waste
-    my $waste_cfg = $self->body->get_extra_metadata("wasteworks_config", {});
-    if ( my $classes = $waste_cfg->{bulky_feature_classes} ) {
-        my %classes = map { $_ => 1 } @$classes;
-        @types = grep { $classes{$_->{FeatureClass}->{ID}} } @types;
-    }
-    return { map { $_->{ID} => $_->{Name} } @types };
-}
-
-sub bulky_nice_collection_date {
-    my ($self, $date) = @_;
-    my $parser = DateTime::Format::Strptime->new( pattern => '%FT%T' );
-    my $dt = $parser->parse_datetime($date)->truncate( to => 'day' );
-    return $dt->strftime('%d %B');
-}
-
-sub bulky_nice_cancellation_cutoff_date {
-    my ( $self, $collection_date ) = @_;
-    my $parser = DateTime::Format::Strptime->new( pattern => '%FT%T' );
-    my $dt
-        = $parser->parse_datetime($collection_date)->truncate( to => 'day' );
-    $dt->subtract( minutes => 5 );
-    return $dt->strftime('%H:%M on %d %B %Y');
-}
-
-sub bulky_nice_item_list {
-    my ($self, $report) = @_;
-
-    my @fields = grep { $_->{name} =~ /ITEM_/ } @{$report->get_extra_fields};
-    return [ map { $_->{value} || () } @fields ];
-}
-
-sub bulky_reminders {
-    my ($self, $params) = @_;
-
-    # Can't see an easy way to find these apart from loop through them all.
-    # Is only daily.
-    my $collections = FixMyStreet::DB->resultset('Problem')->search({
-        category => 'Bulky collection',
-        state => [ FixMyStreet::DB::Result::Problem->open_states ], # XXX?
-    });
-    my $parser = DateTime::Format::Strptime->new( pattern => '%FT%T' );
-    my $now = DateTime->now->set_time_zone(FixMyStreet->local_time_zone);
-
-    while (my $report = $collections->next) {
-        my $r1 = $report->get_extra_metadata('reminder_1');
-        my $r3 = $report->get_extra_metadata('reminder_3');
-        next if $r1; # No reminders left to do
-
-        my $date = $report->get_extra_field_value('DATE');
-
-        # Shouldn't happen, but better to be safe.
-        next unless $date;
-
-        my $dt = $parser->parse_datetime($date)->truncate( to => 'day' );
-
-        # If booking has been cancelled (or somehow the collection date has
-        # already passed) then mark this report as done so we don't see it
-        # again tomorrow.
-        my $cancelled = $self->bulky_cancellation_report($report);
-        if ( $cancelled || $dt < $now) {
-            $report->set_extra_metadata(reminder_1 => 1);
-            $report->set_extra_metadata(reminder_3 => 1);
-            $report->update;
-            next;
-        }
-
-        my $d1 = $dt->clone->subtract(days => 1);
-        my $d3 = $dt->clone->subtract(days => 3);
-
-        my $h = {
-            report => $report,
-            cobrand => $self,
-        };
-
-        if (!$r3 && $now >= $d3 && $now < $d1) {
-            $h->{days} = 3;
-            $self->_bulky_send_reminder_email($report, $h, $params);
-            $report->set_extra_metadata(reminder_3 => 1);
-            $report->update;
-        } elsif ($now >= $d1 && $now < $dt) {
-            $h->{days} = 1;
-            $self->_bulky_send_reminder_email($report, $h, $params);
-            $report->set_extra_metadata(reminder_1 => 1);
-            $report->update;
-        }
-    }
-}
-
-sub _bulky_send_reminder_email {
-    my ($self, $report, $h, $params) = @_;
-
-    my $token = FixMyStreet::DB->resultset('Token')->new({
-        scope => 'email_sign_in',
-        data  => {
-            # This should be the view your collections page, most likely
-            r => $report->url,
-        }
-    });
-    $h->{url} = "/M/" . $token->token;
-
-    my $result = FixMyStreet::Email::send_cron(
-        FixMyStreet::DB->schema,
-        'waste/bulky-reminder.txt',
-        $h,
-        { To => [ [ $report->user->email, $report->name ] ] },
-        undef,
-        $params->{nomail},
-        $self,
-        $report->lang,
+            payment_method =>
+                $collection_report->get_extra_field_value('payment_method'),
+            payment_code =>
+                $collection_report->get_extra_field_value('PaymentCode'),
+            auth_code =>
+                $collection_report->get_extra_metadata('authCode'),
+            continuous_audit_number =>
+                $collection_report->get_extra_metadata(
+                'continuousAuditNumber'),
+            original_sr_number => $c->get_param('ORIGINAL_SR_NUMBER'),
+            payment_date       => $collection_report->created,
+            scp_response       =>
+                $collection_report->get_extra_metadata('scpReference'),
+        },
     );
-    unless ($result) {
-        print "  ...success\n" if $params->{verbose};
-        $token->insert();
-    } else {
-        print " ...failed\n" if $params->{verbose};
-    }
 }
 
 1;

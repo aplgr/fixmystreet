@@ -13,11 +13,14 @@
   [% IF public_councils_text_at_top %]
     [% INCLUDE public_councils_text %]
   [% END %]
+    [% TRY %][% INCLUDE 'report/new/_category_extra_top.html' %][% CATCH file %][% END %]
+
+    [% TRY %][% INCLUDE 'report/new/category_filter.html' %][% CATCH file %][% END %]
 
     [% PROCESS "report/new/category_wrapper.html" %]
     [% TRY %][% PROCESS 'report/new/after_category.html' %][% CATCH file %][% END %]
 
-    <button class="btn btn--block btn--final hidden-nojs js-reporting-page--next"
+    <button class="btn btn--block btn--final btn--primary hidden-nojs js-reporting-page--next"
         [% ' disabled' IF disable_form_message %]>[% loc('Continue') %]</button>
 </div>
 
@@ -29,7 +32,7 @@
     </div>
 
     <div class="js-post-category-messages"></div>
-    <button class="btn btn--block btn--final hidden-nojs js-reporting-page--next">[% loc('Continue') %]</button>
+    <button class="btn btn--block btn--final btn--primary hidden-nojs js-reporting-page--next">[% loc('Continue') %]</button>
 </div>
 
 [% PROCESS "report/new/duplicate_suggestions.html" %]
@@ -40,7 +43,7 @@
     [% PROCESS "report/new/category_extras.html" %]
   [% END %]
     <div class="js-post-category-messages"></div>
-    <button class="btn btn--block btn--final hidden-nojs js-reporting-page--next">[% loc('Continue') %]</button>
+    <button class="btn btn--block btn--final btn--primary hidden-nojs js-reporting-page--next">[% loc('Continue') %]</button>
 </div>
 
 [% IF form_show_category_only %]
@@ -58,7 +61,7 @@
         [% PROCESS 'report/form/photo_upload.html' type='report' %]
         [% PROCESS 'report/new/after_photo.html' %]
 
-        <button class="btn btn--block btn--final hidden-nojs js-reporting-page--next">[% loc('Continue') %]</button>
+        <button class="btn btn--block btn--final btn--primary hidden-nojs js-reporting-page--next">[% loc('Continue') %]</button>
     </div>
 [% END %]
 
@@ -71,13 +74,7 @@
 
     [% TRY %][% PROCESS 'report/new/after_title.html' %][% CATCH file %][% END %]
 
-    [% DEFAULT form_detail_label = loc('Explain what’s wrong') %]
-    <label for="form_detail">[% form_detail_label %]</label>
-
-    [%# You can prevent a hint being printed by setting form_detail_placeholder to a Falsey value %]
-  [% IF NOT form_detail_placeholder.defined %]
-    [% SET form_detail_placeholder = loc('e.g. ‘This pothole has been here for two months and…’') %]
-  [% END %]
+    <label id="detail-label" for="form_detail">[% contact_detail_label OR form_detail_label %]</label>
 
   [% IF contact_detail_hint %]
     <p class="form-hint" id="detail-hint">[% contact_detail_hint %]</p>
@@ -89,7 +86,7 @@
     <p class='form-error'>[% field_errors.detail %]</p>
   [% END %]
 
-    <textarea class="form-control" rows="7" cols="26" name="detail" id="form_detail" [% IF form_detail_placeholder %]aria-describedby="detail-hint"[% END %][% field_required %]>[% report.detail | html %]</textarea>
+    <textarea class="form-control" rows="7" cols="26" name="detail" id="form_detail" [% IF form_detail_placeholder OR contact_detail_hint %]aria-describedby="detail-hint"[% END %][% field_required %]>[% report.detail | html %]</textarea>
 
     [% TRY %][% PROCESS 'report/new/inline-tips.html' %][% CATCH file %][% END %]
 

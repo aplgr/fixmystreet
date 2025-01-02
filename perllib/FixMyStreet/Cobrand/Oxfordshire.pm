@@ -57,7 +57,7 @@ sub disambiguate_location {
 }
 
 # don't send questionnaires to people who used the OCC cobrand to report their problem
-sub send_questionnaires { return 0; }
+sub send_questionnaires { 0 }
 
 # increase map zoom level so street names are visible
 sub default_map_zoom { 5 }
@@ -73,9 +73,7 @@ sub lookup_by_ref {
     my ($self, $ref) = @_;
 
     if ( $ref =~ /^ENQ/ ) {
-        my $len = length($ref);
-        my $filter = "%T18:customer_reference,T$len:$ref,%";
-        return { 'extra' => { -like => $filter } };
+        return { extra => { '@>' => '{"customer_reference":"' . $ref . '"}' } };
     }
 
     return 0;
@@ -87,20 +85,18 @@ sub reports_ordering {
 
 sub pin_colour {
     my ( $self, $p, $context ) = @_;
-    return 'grey' unless $self->owns_problem( $p );
-    return 'grey' if $p->is_closed;
-    return 'green' if $p->is_fixed;
-    return 'yellow' if $p->state eq 'confirmed';
-    return 'orange'; # all the other `open_states` like "in progress"
+    return 'grey-cross' if ($context||'') ne 'reports' && !$self->owns_problem($p);
+    return 'grey-cross' if $p->is_closed;
+    return 'green-tick' if $p->is_fixed;
+    return 'yellow-cone' if $p->state eq 'confirmed';
+    return 'orange-work'; # all the other `open_states` like "in progress"
 }
 
 sub pin_new_report_colour {
-    return 'yellow';
+    return 'yellow-cone';
 }
 
-sub path_to_pin_icons {
-    return '/cobrands/oxfordshire/images/';
-}
+sub path_to_pin_icons { '/i/pins/whole-shadow-cone-spot/' }
 
 sub pin_hover_title {
     my ($self, $problem, $title) = @_;
@@ -112,13 +108,14 @@ sub state_groups_inspect {
     [
         [ 'New', [ 'confirmed', 'investigating' ] ],
         [ 'Scheduled', [ 'action scheduled' ] ],
+        [ 'Pending', [ 'in progress' ] ],
         [ 'Fixed', [ 'fixed - council' ] ],
         [ 'Closed', [ 'not responsible', 'duplicate', 'unable to fix' ] ],
     ]
 }
 
 sub open311_config {
-    my ($self, $row, $h, $params) = @_;
+    my ($self, $row, $h, $params, $contact) = @_;
 
     $params->{multi_photos} = 1;
     $params->{extended_description} = 'oxfordshire';
@@ -144,6 +141,8 @@ sub open311_extra_data_include {
             value => $row->detail },
             { name => 'category',
             value => $row->category },
+            { name => 'group',
+              value => $row->get_extra_metadata('group', '') },
         ];
         push @$extra, { name => 'staff_role', value => $roles } if $roles;
         return $extra;
@@ -165,18 +164,10 @@ sub open311_config_updates {
 sub open311_pre_send {
     my ($self, $row, $open311) = @_;
 
-    $self->{ox_original_detail} = $row->detail;
-
     if (my $fid = $row->get_extra_field_value('feature_id')) {
         my $text = "Asset Id: $fid\n\n" . $row->detail;
         $row->detail($text);
     }
-}
-
-sub open311_post_send {
-    my ($self, $row, $h) = @_;
-
-    $row->detail($self->{ox_original_detail});
 }
 
 sub open311_munge_update_params {
@@ -234,7 +225,7 @@ sub open311_filter_contacts_for_deletion {
     # open311-populate-service-list, and this flag is used to stop them
     # being deleted when that script runs.
     return $contacts->search({
-        extra => { -not_like => '%T15:open311_protect,I1:1%' },
+        -not => { extra => { '@>' => '{"open311_protect":1}' } },
     });
 }
 
@@ -342,25 +333,92 @@ sub dashboard_export_problems_add_columns {
     $csv->add_csv_columns(
         external_ref => 'HIAMS/Exor Ref',
         usrn => 'USRN',
+        staff_role => 'Staff Role',
     );
+
+    if ($csv->dbi) {
+        $csv->csv_extra_data(sub {
+            my $report = shift;
+            my $usrn = $csv->_extra_field($report, 'usrn') || '';
+            # Try and get a HIAMS reference first of all
+            my $ref = $csv->_extra_metadata($report, 'customer_reference');
+            unless ($ref) {
+                # No HIAMS ref which means it's either an older Exor report
+                # or a HIAMS report which hasn't had its reference set yet.
+                # We detect the latter case by the id and external_id being the same.
+                $ref = $report->{external_id} if $report->{id} ne ( $report->{external_id} || '' );
+            }
+            return {
+                external_ref => ( $ref || '' ),
+                usrn => $usrn,
+            };
+        });
+        return; # Rest already covered
+    }
+
+
+    my $user_lookup = $self->csv_staff_users;
+    my $userroles = $self->csv_staff_roles($user_lookup);
 
     $csv->csv_extra_data(sub {
         my $report = shift;
-        my $usrn = $report->get_extra_field_value('usrn') || '';
+        my $usrn = $csv->_extra_field($report, 'usrn') || '';
         # Try and get a HIAMS reference first of all
-        my $ref = $report->get_extra_metadata('customer_reference');
+        my $ref = $csv->_extra_metadata($report, 'customer_reference');
         unless ($ref) {
             # No HIAMS ref which means it's either an older Exor report
             # or a HIAMS report which hasn't had its reference set yet.
             # We detect the latter case by the id and external_id being the same.
             $ref = $report->external_id if $report->id ne ( $report->external_id || '' );
         }
+        my $by = $csv->_extra_metadata($report, 'contributed_by');
+        my $staff_role = '';
+        if ($by) {
+            $staff_role = join(',', @{$userroles->{$by} || []});
+        }
         return {
             external_ref => ( $ref || '' ),
             usrn => $usrn,
+            staff_role => $staff_role,
         };
     });
 }
+
+=head2 dashboard_export_updates_add_columns
+
+Adds 'Staff Role' column.
+
+=cut
+
+sub dashboard_export_updates_add_columns {
+    my ($self, $csv) = @_;
+
+    $csv->add_csv_columns(
+        staff_role => 'Staff Role',
+    );
+
+    $csv->objects_attrs({
+        '+columns' => ['user.email'],
+        join => 'user',
+    });
+    my $user_lookup = $self->csv_staff_users;
+    my $userroles = $self->csv_staff_roles($user_lookup);
+
+
+    $csv->csv_extra_data(sub {
+        my $report = shift;
+
+        my $by = $csv->_extra_metadata($report, 'contributed_by');
+        my $staff_role = '';
+        if ($by) {
+            $staff_role = join(',', @{$userroles->{$by} || []});
+        }
+        return {
+            staff_role => $staff_role,
+        };
+    });
+}
+
 
 sub defect_wfs_query {
     my ($self, $bbox) = @_;
@@ -434,7 +492,7 @@ sub pins_from_wfs {
             id => $fake_id--,
             latitude => @$coords[1],
             longitude => @$coords[0],
-            colour => 'defects',
+            colour => 'blue-work',
             title => $title,
         };
     } @{ $wfs->{features} };

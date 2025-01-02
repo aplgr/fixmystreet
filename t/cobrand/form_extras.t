@@ -1,3 +1,6 @@
+use FixMyStreet;
+BEGIN { FixMyStreet->test_mode(1); }
+
 package FixMyStreet::Cobrand::Tester;
 use parent 'FixMyStreet::Cobrand::FixMyStreet';
 
@@ -84,7 +87,7 @@ FixMyStreet::override_config {
     );
     $mech->content_contains('Now check your email');
 
-    my $problem = FixMyStreet::DB->resultset('Problem')->search({}, { order_by => { -desc => 'id' } })->first;
+    my $problem = FixMyStreet::DB->resultset('Problem')->order_by('-id')->first;
     is $problem->get_extra_metadata('address'), 'My address', 'Address is stored';
     is $problem->get_extra_metadata('passport'), 'P123456', 'Passport number is stored';
 };

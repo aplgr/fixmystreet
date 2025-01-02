@@ -1,21 +1,4 @@
 describe('Duplicate tests', function() {
-    it('does not try and fetch duplicates which will not get shown', function() {
-      cy.server();
-      cy.route('/report/new/ajax*').as('report-ajax');
-      cy.request({
-        method: 'POST',
-        url: '/auth?r=/',
-        form: true,
-        body: { username: 'admin@example.org', password_sign_in: 'password' }
-      });
-      cy.visit('http://fixmystreet.localhost:3001/report/1');
-      cy.contains('Report another problem here').click();
-      cy.wait('@report-ajax');
-      cy.pickCategory('Potholes');
-      cy.nextPageReporting();
-      cy.get('div.dropzone').should('be.visible');
-    });
-
     it('has a separate duplicate suggestions step when needed', function() {
       cy.server();
       cy.route('/report/new/ajax*').as('report-ajax');
@@ -26,7 +9,7 @@ describe('Duplicate tests', function() {
       cy.wait('@report-ajax');
       cy.pickCategory('Licensing');
       cy.nextPageReporting();
-      cy.get('[id=subcategory_Licensing]').select('Skips');
+      cy.get('.js-subcategory input[value=Skips]').click();
       cy.wait('@nearby-ajax');
       cy.nextPageReporting();
       cy.contains('Already been reported?');
@@ -34,7 +17,25 @@ describe('Duplicate tests', function() {
       cy.visit('http://borsetshire.localhost:3001/_test/teardown/regression-duplicate-hide');
     });
 
-    it.only('does not show duplicate suggestions when signing in during reporting', function() {
+    it('has a separate duplicate suggestions step when on cobrands on FMS', function() {
+      cy.server();
+      cy.route('/report/new/ajax*').as('report-ajax');
+      cy.route('/around/nearby*').as('nearby-ajax');
+      cy.visit('http://fixmystreet.localhost:3001/_test/setup/regression-duplicate-hide'); // Server-side setup
+      cy.visit('http://fixmystreet.localhost:3001/report/1');
+      cy.contains('Report another problem here').click();
+      cy.wait('@report-ajax');
+      cy.pickCategory('Licensing');
+      cy.nextPageReporting();
+      cy.get('.js-subcategory input[value=Skips]').click();
+      cy.wait('@nearby-ajax');
+      cy.nextPageReporting();
+      cy.contains('Already been reported?');
+      cy.get('.extra-category-questions').should('not.be.visible');
+      cy.visit('http://fixmystreet.localhost:3001/_test/teardown/regression-duplicate-hide');
+    });
+
+    it('does not show duplicate suggestions when signing in during reporting', function() {
       cy.server();
       cy.route('/report/new/ajax*').as('report-ajax');
       cy.route('/around/nearby*').as('nearby-ajax');

@@ -16,7 +16,7 @@
   }
 }
 
-body.frontpage, body.twothirdswidthpage, body.fullwidthpage, body.authpage {
+body:not(.mappage) {
   // Display the BCC logo and header correctly
   #site-logo {
     background: url(/cobrands/bristol/img/bcclogo.png) 0 14px no-repeat;
@@ -43,25 +43,20 @@ body.frontpage, body.twothirdswidthpage, body.fullwidthpage, body.authpage {
 
   #front-main {
     background-color: white;
-    text-align: left;
     padding-top: 40px;
-
-    #postcodeForm {
-      margin-top: 0;
-
-      div {
-        margin: 0;
-      }
-    }
 
     h1 {
       font-size: 3em;
     }
 
-    h1 + p {
+    h1 + h2 {
       font-size: 1.75em;
       line-height: 1.25em;
       max-width: 640px;
+    }
+
+    .form-hint {
+      color: transparentize($primary_b, 0.15);
     }
   }
 
@@ -88,17 +83,12 @@ body.frontpage, body.twothirdswidthpage, body.fullwidthpage, body.authpage {
   .nav-menu--main a.report-a-problem-btn {
     background-color: transparent;
   }
-
-  // Put FAQ side nav at correct vertical position
-  .content .sticky-sidebar aside {
-    top: 12.5em;
-  }
 }
 
 body.mappage {
   // Add a red border-bottom *inside* the header
   #site-header {
-    @include box-sizing(border-box);
+    box-sizing: border-box;
     border-bottom: solid 5px $bcc_red;
   }
 

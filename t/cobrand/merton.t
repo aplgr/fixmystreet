@@ -2,6 +2,7 @@ use Test::MockModule;
 use FixMyStreet::TestMech;
 use HTML::Selector::Element qw(find);
 use FixMyStreet::Script::Reports;
+use FixMyStreet::Script::Alerts;
 
 FixMyStreet::App->log->disable('info');
 END { FixMyStreet::App->log->enable('info'); }
@@ -11,25 +12,26 @@ my $cobrand = Test::MockModule->new('FixMyStreet::Cobrand::Merton');
 
 $cobrand->mock('area_types', sub { [ 'LBO' ] });
 
+my $superuser = $mech->create_user_ok('superuser@example.com', name => 'Super User', is_superuser => 1);
 my $merton = $mech->create_body_ok(2500, 'Merton Council', {
     api_key => 'aaa',
     jurisdiction => 'merton',
     endpoint => 'http://endpoint.example.org',
     send_method => 'Open311',
-}, {
+    comment_user => $superuser,
     cobrand => 'merton'
 });
 my @cats = ('Litter', 'Other', 'Potholes', 'Traffic lights');
 for my $contact ( @cats ) {
-    $mech->create_contact_ok(body_id => $merton->id, category => $contact, email => "\L$contact\@merton.example.org");
+    $mech->create_contact_ok(body_id => $merton->id, category => $contact, email => "\L$contact\@merton.example.org",
+        extra => { anonymous_allowed => 1 });
 }
 
-my $hackney = $mech->create_body_ok(2508, 'Hackney Council', {}, { cobrand => 'hackney' });
+my $hackney = $mech->create_body_ok(2508, 'Hackney Council', { cobrand => 'hackney' });
 for my $contact ( @cats ) {
     $mech->create_contact_ok(body_id => $hackney->id, category => $contact, email => "\L$contact\@hackney.example.org");
 }
 
-my $superuser = $mech->create_user_ok('superuser@example.com', name => 'Super User', is_superuser => 1);
 my $counciluser = $mech->create_user_ok('counciluser@example.com', name => 'Council User', from_body => $merton);
 my $normaluser = $mech->create_user_ok('normaluser@example.com', name => 'Normal User');
 my $hackneyuser = $mech->create_user_ok('hackneyuser@example.com', name => 'Hackney User', from_body => $hackney);
@@ -48,7 +50,7 @@ my ($problem2) = $mech->create_problems_for_body(1, $hackney->id, 'Title', {
 
 
 FixMyStreet::override_config {
-    ALLOWED_COBRANDS => [ 'merton' ],
+    ALLOWED_COBRANDS => [ 'merton', 'tfl' ],
     MAPIT_URL => 'http://mapit.uk/',
     COBRAND_FEATURES => {
         anonymous_account => {
@@ -56,6 +58,7 @@ FixMyStreet::override_config {
         },
     },
 }, sub {
+    ok $mech->host('merton.fixmystreet.com'), 'set host';
 
     subtest 'cobrand homepage displays council name' => sub {
         $mech->get_ok('/');
@@ -80,6 +83,7 @@ FixMyStreet::override_config {
         $mech->get_ok('/around');
         $mech->submit_form_ok( { with_fields => { pc => 'SM4 5DX', } }, "submit location" );
         $mech->follow_link_ok( { text_regex => qr/skip this step/i, }, "follow 'skip this step' link" );
+        $mech->submit_form_ok( { with_fields => { category => 'Litter', } }, "submit category" );
         $mech->submit_form_ok(
             {
                 button => 'report_anonymously',
@@ -115,6 +119,17 @@ FixMyStreet::override_config {
         is $alert, undef, "no alert created";
 
         $mech->not_logged_in_ok;
+    };
+
+    subtest "hides the TfL River Piers category" => sub {
+        my $tfl = $mech->create_body_ok(2500, 'TfL');
+        $mech->create_contact_ok(body_id => $tfl->id, category => 'River Piers', email => 'tfl@example.org');
+        $mech->create_contact_ok(body_id => $tfl->id, category => 'River Piers - Cleaning', email => 'tfl@example.org');
+        $mech->create_contact_ok(body_id => $tfl->id, category => 'River Piers Damage doors and glass', email => 'tfl@example.org');
+
+        my $json = $mech->get_ok_json('/report/new/ajax?latitude=51.400975&longitude=-0.19655');
+        my $categories = [sort keys %{$json->{by_category}}];
+        is_deeply $categories, ['Litter', 'Other', 'Potholes', 'Traffic lights'], "Merton doesn't have any River Piers categories";
     };
 };
 
@@ -207,6 +222,7 @@ FixMyStreet::override_config {
         $mech->get_ok('/around');
         $mech->submit_form_ok( { with_fields => { pc => 'SM4 5DX', } }, "submit location" );
         $mech->follow_link_ok( { text_regex => qr/skip this step/i, }, "follow 'skip this step' link" );
+        $mech->submit_form_ok( { with_fields => { category => 'Litter', } }, "submit category");
         $mech->submit_form_ok(
             {
                 button => 'report_anonymously',
@@ -296,6 +312,92 @@ subtest "hides duplicate updates from endpoint" => sub {
 
     $p->discard_changes;
     is $p->comments->search({ state => 'confirmed' })->count, 1;
+};
+
+package SOAP::Result;
+sub result { return $_[0]->{result}; }
+sub new { my $c = shift; bless { @_ }, $c; }
+
+package main;
+
+subtest 'updating of waste reports' => sub {
+    my $date = DateTime->now->subtract(days => 1)->strftime('%Y-%m-%dT%H:%M:%SZ');
+    my $integ = Test::MockModule->new('SOAP::Lite');
+    $integ->mock(call => sub {
+        my ($cls, @args) = @_;
+        my $method = $args[0]->name;
+        if ($method eq 'GetEvent') {
+            my ($key, $type, $value) = ${$args[3]->value}->value;
+            my $external_id = ${$value->value}->value->value;
+            my ($waste, $event_state_id, $resolution_code) = split /-/, $external_id;
+            my $data = [];
+            return SOAP::Result->new(result => {
+                Guid => $external_id,
+                EventStateId => $event_state_id,
+                EventTypeId => '1636',
+                LastUpdatedDate => { OffsetMinutes => 60, DateTime => $date },
+                ResolutionCodeId => $resolution_code,
+                Data => { ExtensibleDatum => $data },
+            });
+        } elsif ($method eq 'GetEventType') {
+            return SOAP::Result->new(result => {
+                Workflow => { States => { State => [
+                    { CoreState => 'New', Name => 'New', Id => 12396 },
+                    { CoreState => 'Pending', Name => 'Allocated to Crew', Id => 12398 },
+                    { CoreState => 'Closed', Name => 'Partially Completed', Id => 12399 },
+                    { CoreState => 'Closed', Name => 'Completed', Id => 12400 },
+                    { CoreState => 'Closed', Name => 'Not Completed', Id => 12401 },
+                    { CoreState => 'Cancelled', Name => 'Cancelled', Id => 12402 },
+                ] } },
+            });
+        } else {
+            is $method, 'UNKNOWN';
+        }
+    });
+
+    my ($report) = $mech->create_problems_for_body(1, $merton->id, 'Bulky collection', {
+        confirmed => \'current_timestamp',
+        user => $normaluser,
+        category => 'Bulky collection',
+        cobrand_data => 'waste',
+        non_public => 1,
+        extra => { payment_reference => 'reference' },
+    });
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => 'merton',
+        COBRAND_FEATURES => {
+            echo => { merton => {
+                url => 'https://www.example.org/',
+                receive_action => 'action',
+                receive_username => 'un',
+                receive_password => 'password',
+            } },
+            waste => { merton => 1 }
+        },
+    }, sub {
+        $mech->clear_emails_ok;
+        $normaluser->create_alert($report->id, { cobrand => 'merton', whensubscribed => $date });
+        my $in = $mech->echo_notify_xml('waste-12402-', 1636, 12402, '', 'FMS-' . $report->id);
+        my $mech2 = $mech->clone;
+        $mech2->host('merton.example.org');
+
+        $mech2->post('/waste/echo', Content_Type => 'text/xml', Content => $in);
+        is $report->comments->count, 1, 'A new update';
+        $report->discard_changes;
+        is $report->state, 'cancelled', 'A state change';
+        FixMyStreet::Script::Alerts::send_updates();
+        my $email = $mech->get_text_body_from_email;
+        like $email, qr/Cancelled/;
+
+        $report->update({ state => 'cancelled' });
+
+        $mech2->post('/waste/echo', Content_Type => 'text/xml', Content => $in);
+        is $report->comments->count, 1, 'No new update';
+        $report->discard_changes;
+        is $report->state, 'cancelled', 'No state change';
+        FixMyStreet::Script::Alerts::send_updates();
+        $mech->email_count_is(0);
+    };
 };
 
 done_testing;

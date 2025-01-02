@@ -54,7 +54,7 @@
     [% INCLUDE 'report/_show_name_label.html' %]
 
 [% IF NOT c.user.phone_verified AND NOT c.cobrand.call_hook('disable_phone_number_entry') %]
-    <label for="form_phone">[% loc('Phone number (optional)') %]</label>
+    <label for="form_phone">[% loc('Phone number') %] <span id="js-optional-phone">[% loc('(optional)') %]</span></label>
     [% IF field_errors.phone %]
       <p class='form-error'>[% field_errors.phone %]</p>
     [% END %]
@@ -62,7 +62,7 @@
 [% END %]
 [% IF NOT c.user.email_verified %]
     <label for="form_email">[% loc('Email address (optional)') %]</label>
-    <input class="form-control" type="text" value="[% report.user.email | html %]" name="email" id="form_email">
+    <input class="form-control" type="email" value="[% report.user.email | html %]" name="email" id="form_email" autocomplete="email">
 [% END %]
 
 [% IF c.user.has_permission_to("report_inspect", bodies_ids) OR c.user.has_permission_to("report_mark_private", bodies_ids) %]

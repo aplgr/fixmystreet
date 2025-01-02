@@ -4,30 +4,38 @@ use utf8;
 use HTML::FormHandler::Moose;
 extends 'FixMyStreet::App::Form::Waste';
 
+has_page discount => (
+    next => 'intro',
+    title => 'Discount',
+    intro => 'garden/_renew_discount.html',
+    fields => ['apply_discount', 'continue_choice'],
+);
+
 has_page intro => (
-    title => 'Renew your green garden waste subscription',
+    title => 'Renew your garden waste subscription',
     template => 'waste/garden/renew.html',
-    fields => ['current_bins', 'bins_wanted', 'payment_method', 'cheque_reference', 'name', 'phone', 'email', 'apply_discount', 'continue_review'],
+    fields => ['current_bins', 'bins_wanted', 'payment_method', 'cheque_reference', 'name', 'phone', 'email', 'email_renewal_reminders', 'continue_review'],
     field_ignore_list => sub {
         my $page = shift;
         my $c = $page->form->c;
         my @exclude;
+        push @exclude, 'email_renewal_reminders' if !$c->cobrand->garden_subscription_email_renew_reminder_opt_in;
         push @exclude, ('payment_method', 'cheque_reference') if $c->stash->{staff_payments_allowed} && !$c->cobrand->waste_staff_choose_payment_method;
-        push @exclude, 'apply_discount' if (!($c->stash->{waste_features}->{ggw_discount_as_percent}) || !($c->stash->{is_staff}));
         return \@exclude;
     },
     update_field_list => sub {
         my $form = shift;
         my $c = $form->{c};
         my $data = $c->stash->{garden_form_data};
-        my $current_bins = $c->get_param('current_bins') || $form->saved_data->{current_bins} || $data->{bins};
-        my $bin_count = $c->get_param('bins_wanted') || $form->saved_data->{bins_wanted} || $data->{bins};
+        my $current_bins = $c->get_param('current_bins') || $form->saved_data->{current_bins} || $data->{bins} || 0;
+        my $bin_count = $c->get_param('bins_wanted') || $form->saved_data->{bins_wanted} || $data->{bins} || 1;
         my $new_bins = $bin_count - $current_bins;
 
         my $edit_current_allowed = $c->cobrand->call_hook('waste_allow_current_bins_edit');
-        my $cost_pa = $c->cobrand->garden_waste_cost_pa($bin_count);
+        my $bins_wanted_disabled = $c->cobrand->call_hook('waste_renewal_bins_wanted_disabled');
+        my $cost_pa = $c->cobrand->garden_waste_renewal_cost_pa($data->{end_date}, $bin_count);
         my $cost_now_admin = $c->cobrand->garden_waste_new_bin_admin_fee($new_bins);
-        if ($data->{apply_discount}) {
+        if ($form->saved_data->{apply_discount}) {
             ($cost_pa, $cost_now_admin) = $c->cobrand->apply_garden_waste_discount(
                 $cost_pa, $cost_now_admin);
         }
@@ -40,29 +48,32 @@ has_page intro => (
 
         return {
             current_bins => { %bin_params, $edit_current_allowed ? (disabled=>0) : () },
-            bins_wanted => { %bin_params },
+            bins_wanted => { %bin_params, $bins_wanted_disabled ? (disabled=>1) : () },
         };
     },
     next => 'summary',
 );
 
+with 'FixMyStreet::App::Form::Waste::Garden::EmailRenewalReminders';
+
 has_page summary => (
     fields => ['tandc', 'submit'],
-    title => 'Renew your green garden waste subscription',
-    template => 'waste/garden/renew_summary.html',
+    title => 'Renew your garden waste subscription',
+    template => 'waste/garden/subscribe_summary.html',
     update_field_list => sub {
         my $form = shift;
         my $c = $form->{c};
         my $data = $form->saved_data;
 
+        my $end_date = $c->stash->{garden_form_data}->{end_date};
         my $current_bins = $data->{current_bins} || 0;
         my $bin_count = $data->{bins_wanted} || 1;
         my $new_bins = $bin_count - $current_bins;
         my $cost_pa;
         if (($data->{container_choice}||'') eq 'sack') {
-            $cost_pa = $c->cobrand->garden_waste_sacks_cost_pa() * $bin_count;
+            $cost_pa = $c->cobrand->garden_waste_renewal_sacks_cost_pa($end_date) * $bin_count;
         } else {
-            $cost_pa = $form->{c}->cobrand->garden_waste_cost_pa($bin_count);
+            $cost_pa = $form->{c}->cobrand->garden_waste_renewal_cost_pa($end_date, $bin_count);
         }
         my $cost_now_admin = $form->{c}->cobrand->garden_waste_new_bin_admin_fee($new_bins);
         if ($data->{apply_discount}) {
@@ -110,6 +121,12 @@ has_field apply_discount => (
     option_label => 'Check box if customer is entitled to a discount',
 );
 
+has_field continue_choice => (
+    type => 'Submit',
+    value => 'Continue',
+    element_attr => { class => 'govuk-button' },
+);
+
 has_field current_bins => (
     type => 'Integer',
     label => 'Number of bins currently on site',
@@ -135,15 +152,7 @@ has_field bins_wanted => (
 );
 
 with 'FixMyStreet::App::Form::Waste::Billing';
-
-has_field tandc => (
-    type => 'Checkbox',
-    required => 1,
-    label => 'Terms and conditions',
-    option_label => FixMyStreet::Template::SafeString->new(
-        'I agree to the <a href="/about/garden_terms" target="_blank">terms and conditions</a>',
-    ),
-);
+with 'FixMyStreet::App::Form::Waste::GardenTandC';
 
 has_field continue_review => (
     type => 'Submit',

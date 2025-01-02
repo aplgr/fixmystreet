@@ -105,7 +105,7 @@ a {
   background-color: $link-focus-background-colour;
 }
 
-.btn, .btn--primary, .btn-primary, .green-btn, #report-cta {
+.btn, .btn--primary, #report-cta {
   @include cobrand-btn-primary;
 }
 
@@ -113,7 +113,7 @@ a {
   @include cobrand-btn-secondary;
 }
 
-.item-list--wards__item a, .item-list--reports__item a {
+.item-list--reports__item a {
   text-decoration: none;
   &:hover {
     h3 {
@@ -157,7 +157,7 @@ body:not(.admin, .mappage.with-actions) {
     @include input-reset;
   }
 
-  select {
+  select:not(#sort) {
     // This makes that the arrow is the same as .multi-select-container
     position: relative;
     background: transparent;
@@ -209,10 +209,7 @@ body:not(.admin, .mappage.with-actions) {
     }
   }
 
-  .multi-select-button,
-  .report-list-filters .multi-select-button,
-  .form-control#sort,
-  select {
+  select:not(#sort) {
     @include one-line-input-height;
   }
 
@@ -293,7 +290,7 @@ body:not(.admin, .mappage.with-actions) {
   }
 
   #show_old_reports_wrapper input[type="checkbox"]:checked:after {
-    @include svg-background-image("/cobrands/fixmystreet/images/check-white");
+    background-image: url("/cobrands/fixmystreet/images/check-white.svg");
   }
 }
 
@@ -301,14 +298,6 @@ body:not(.admin, .mappage.with-actions) {
 .report-list-filters .multi-select-button,
 #bulk-assign-form .multi-select-button {
   max-width: 8em;
-}
-
-input.form-error, textarea.form-error {
-  border-color: $error-color;
-}
-
-div.form-error, p.form-error {
-  background: $error-color;
 }
 
 .form-section-description, .change_location {
@@ -325,7 +314,7 @@ div.form-error, p.form-error {
 #site-logo {
   display: block;
   font-family: $body-font;
-  @include svg-background-image("/cobrands/camden/images/camden-logo-white");
+  background-image: url("/cobrands/camden/images/camden-logo-white.svg");
   background-position: 0;
   background-size: $logo-width-mobile $logo-height-mobile;
   background-repeat: no-repeat;
@@ -337,7 +326,7 @@ div.form-error, p.form-error {
   white-space: nowrap;
 
   &:focus {
-    @include svg-background-image("/cobrands/camden/images/camden-logo-black");
+    background-image: url("/cobrands/camden/images/camden-logo-black.svg");
   }
 }
 
@@ -438,7 +427,6 @@ dl dt {
 }
 
 #front-main {
-  text-align: left;
   padding-top: 1em;
   padding-bottom: 3px;
   margin-top: 0;
@@ -449,72 +437,65 @@ dl dt {
     }
   }
 
-  h1+p {
-    color: $gray-2;
-  }
-
   h2 {
     font-style: normal;
-    color: $primary_b;
     @extend .body-large;
   }
+}
 
-  #postcodeForm {
-    background-color: $white-2;
-    color: $primary_b;
-    margin-top: 1em;
+.postcode-form-box {
+  margin-top: 1em;
 
-    div {
-      border-width: 0px;
-      align-items: center;
-      background-color: transparent;
+  div {
+    border-width: 0px;
+    align-items: center;
+    background-color: transparent;
+  }
+
+  $border-width:2px;
+  $max-height: 45px;
+
+  input#sub {
+    background: $primary_button_background_color !important;
+    margin-top: -1px;
+    margin-bottom: -1px;
+    border: $border-width solid $primary_button_border_color;
+    max-height: $max-height;
+    height: $max-height;
+    
+
+    &:hover {
+      background: $primary_button_background_color_hover !important;
+      color: $primary_button_color_hover !important;
+      border-color: $primary_button_border_color_hover;
+      text-decoration: underline;
+      text-decoration-thickness: $btn-text-decoration-thickness-hover;
     }
 
-    $border-width:2px;
-    $max-height: 45px;
-
-    input#sub {
-      background: $primary_button_background_color !important;
-      margin-top: -1px;
-      margin-bottom: -1px;
-      border: $border-width solid $primary_button_border_color;
-      max-height: $max-height;
-      height: $max-height;
-      
-
+    &:focus {
+      background: $primary_button_background_color_focus !important;
+      color: $primary_button_color_focus !important;
+      text-decoration: underline;
+      text-decoration-thickness: $btn-text-decoration-thickness-focus;
+      $text-underline-offset: $text-underline-offset;
+      border: 2px solid $primary_button_border_color_focus;
+      border-left: 0px;
+      outline: none;
       &:hover {
-        background: $primary_button_background_color_hover !important;
-        color: $primary_button_color_hover !important;
-        border-color: $primary_button_border_color_hover;
-        text-decoration: underline;
-        text-decoration-thickness: $btn-text-decoration-thickness-hover;
-      }
-
-      &:focus {
-        background: $primary_button_background_color_focus !important;
-        color: $primary_button_color_focus !important;
-        text-decoration: underline;
-        text-decoration-thickness: $btn-text-decoration-thickness-focus;
-        $text-underline-offset: $text-underline-offset;
-        border: 2px solid $primary_button_border_color_focus;
-        border-left: 0px;
-        outline: none;
-        &:hover {
-          text-decoration: none;
-        }
+        text-decoration: none;
       }
     }
+  }
 
-    input#pc {
-      margin: 2px 0;
-      max-height: $max-height;
-      height: $max-height;
-      background: $secondary_button_background_color_hover !important;
-      border: $border-width solid $primary_b !important;
-      border-right-width: 0 !important;
-      &:focus {
-        outline:  2px solid $link-focus-background-colour;
-      }
+  input#pc {
+    margin: 2px 0;
+    max-height: $max-height;
+    height: $max-height;
+    background: $secondary_button_background_color_hover !important;
+    border: $border-width solid $primary_b !important;
+    border-right-width: 0 !important;
+    &:focus {
+      outline:  2px solid $link-focus-background-colour;
     }
   }
 }
@@ -614,7 +595,7 @@ border-right-width: 3px;
   .footer-logo {
     display: block;
     $logo-height: 20px;
-    @include svg-background-image("/cobrands/camden/images/camden-logo-white");
+    background-image: url("/cobrands/camden/images/camden-logo-white.svg");
     background-repeat: no-repeat;
     background-position: 0;
     background-size: 100px $logo-height;
@@ -626,7 +607,7 @@ border-right-width: 3px;
     white-space: nowrap;
 
     &:focus {
-      @include svg-background-image("/cobrands/camden/images/camden-logo-black");
+      background-image: url("/cobrands/camden/images/camden-logo-black.svg");
     }
   }
 

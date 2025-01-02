@@ -151,8 +151,20 @@ sub find_problem {
 sub process_update {
     my ($self, $request, $p) = @_;
 
+    my $db = FixMyStreet::DB->schema->storage;
+    my $comment = $db->txn_do(sub {
+        $p = FixMyStreet::DB->resultset('Problem')->search({ id => $p->id }, { for => \'UPDATE' })->single;
+        return $self->_process_update($request, $p);
+    });
+    return $comment;
+}
+
+sub _process_update {
+    my ($self, $request, $p) = @_;
     my $open311 = $self->current_open311;
     my $body = $self->current_body;
+
+    $self->_handle_assigned_user($request, $p);
 
     my $state = $open311->map_state( $request->{status} );
     my $old_state = $p->state;
@@ -166,6 +178,18 @@ sub process_update {
     if (!$email_text && $request->{email_text}) {
         $email_text = $request->{email_text};
     };
+
+    if ($request->{extras} && $request->{extras}{latest_data_only} ) {
+        # Hide if the new comment is the same as the latest comment by the body user
+        my $latest = $p->comments->search({
+            state => 'confirmed',
+            user_id => $self->system_user->id,
+        }, {
+            order_by => [ { -desc => 'confirmed' }, { -desc => 'id' } ],
+            rows => 1,
+        })->first;
+        return if $latest && $text eq $latest->text && $state eq $latest->problem_state;
+    }
 
     # An update shouldn't precede an auto-internal update nor should it be earlier than when the
     # report was sent.
@@ -207,6 +231,10 @@ sub process_update {
         $p->set_extra_metadata( customer_reference => $customer_reference );
     }
 
+    foreach (grep { /^fms_extra_/ } keys %$request) {
+        $comment->set_extra_metadata( $_ => $request->{$_} );
+    }
+
     $open311->add_media($request->{media_url}, $comment)
         if $request->{media_url};
 
@@ -245,7 +273,7 @@ sub process_update {
         || ($comment->problem_state && $state ne $old_state);
 
     my $cobrand = $body->get_cobrand_handler;
-    $cobrand->call_hook(open311_get_update_munging => $comment)
+    $cobrand->call_hook(open311_get_update_munging => $comment, $state, $request)
         if $cobrand;
 
     # As comment->created has been looked at above, its time zone has been shifted
@@ -261,19 +289,7 @@ sub process_update {
     $comment->insert();
 
     if ( $self->suppress_alerts ) {
-        my @alerts = $self->schema->resultset('Alert')->search( {
-            alert_type => 'new_updates',
-            parameter  => $p->id,
-            confirmed  => 1,
-            user_id    => $p->user->id,
-        } );
-
-        for my $alert (@alerts) {
-            my $alerts_sent = $self->schema->resultset('AlertSent')->find_or_create( {
-                alert_id  => $alert->id,
-                parameter => $comment->id,
-            } );
-        }
+        $p->cancel_update_alert($comment->id, $p->user->id);
     }
 
     return $comment;
@@ -299,6 +315,41 @@ sub comment_text_for_request {
 
     print STDERR "Couldn't determine update text for $request->{update_id} (report " . $problem->id . ")\n";
     return ("", undef);
+}
+
+sub _handle_assigned_user {
+    my ($self, $request, $p) = @_;
+    my $body = $self->current_body;
+
+    # Assign admin user to report if 'assigned_user_*' fields supplied
+    if ( $request->{extras} && $request->{extras}{assigned_user_email} ) {
+        my $assigned_user_email = $request->{extras}{assigned_user_email};
+        my $assigned_user_name  = $request->{extras}{assigned_user_name};
+
+        my $assigned_user
+            = FixMyStreet::DB->resultset('User')
+            ->find( { email => $assigned_user_email } );
+
+        unless ($assigned_user) {
+            $assigned_user = FixMyStreet::DB->resultset('User')->create(
+                {   email          => $assigned_user_email,
+                    name           => $assigned_user_name,
+                    from_body      => $body->id,
+                    email_verified => 1,
+                },
+            );
+
+            # Make them an inspector
+            # TODO Other permissions required?
+            $assigned_user->user_body_permissions->create(
+                {   body_id         => $body->id,
+                    permission_type => 'report_inspect',
+                }
+            );
+        }
+
+        $assigned_user->add_to_planned_reports($p);
+    }
 }
 
 1;

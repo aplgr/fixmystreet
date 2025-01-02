@@ -1,4 +1,4 @@
-<form method="post" action="[% c.uri_for_action('admin/bodies/edit', [ body_id ] ) %]" enctype="application/x-www-form-urlencoded" accept-charset="utf-8" id="category_edit">
+<form method="post" id="category_edit">
 
   [% PROCESS 'admin/bodies/_category_field.html' %]
 
@@ -76,12 +76,17 @@
     [% TRY %][% PROCESS 'report/new/_form_labels.html' %][% CATCH file %][% END %]
     <label for="title-hint">[% loc('Summary hint text') %]</label>
     <p class="form-hint" id="title-hint-hint">
-        Default is “[% form_title_placeholder OR loc('e.g. ‘10 inch pothole on Example St, near post box’') %]”
+        Default is “[% form_title_placeholder %]”
     </p>
     <input type="text" class="form-control" id="title-hint" aria-describedby="title-hint-hint" name="title_hint" size="30" value="[% contact.get_extra_metadata('title_hint') %]">
+    <label for="detail-label">[% loc('Details label') %]</label>
+    <p class="form-hint" id="detail-label-hint">
+        Default is “[% form_detail_label %]”
+    </p>
+    <input type="text" class="form-control" id="detail-label" aria-describedby="detail-label-hint" name="detail_label" size="30" value="[% contact.get_extra_metadata('detail_label') %]">
     <label for="detail-hint">[% loc('Details hint text') %]</label>
     <p class="form-hint" id="detail-hint-hint">
-        Default is “[% form_detail_placeholder.defined ? form_detail_placeholder : loc('e.g. ‘This pothole has been here for two months and…’') %]”
+        Default is “[% form_detail_placeholder %]”
     </p>
     <input type="text" class="form-control" id="detail-hint" aria-describedby="detail-hint-hint" name="detail_hint" size="30" value="[% contact.get_extra_metadata('detail_hint') %]">
 
@@ -146,6 +151,17 @@
       <span class='form-hint'>[% loc('Use this if there is a chance that multiple bodies covering the same area that have the same contacts and you want to just send reports to one, rather than multiple bodies') %]</span>
     </p>
 
+    <p class="form-check">
+      <input type="checkbox" name="phone_required" value="1" id="phone_required" [% ' checked' IF contact.extra.phone_required %]>
+      <label for="phone_required">[% loc('Require a phone number to be provided') %]</label>
+    </p>
+
+    <p class="form-check">
+      <input type="checkbox" name="litter_category_for_he" value="1" id="litter_category_for_he" [% ' checked' IF contact.extra.litter_category_for_he %]>
+      <label for="litter_category_for_he">[% loc('Is a litter category for the purposes of receiving reports on National Highways roads') %]</label>
+      <span class='form-hint'>[% loc('Use this if a category should be considered a litter category where a council is responsible for litter on a section of Highways England road') %]</span>
+    </p>
+
   [% IF body.can_be_devolved %]
     <div class="admin-hint">
       <p>
@@ -184,7 +200,6 @@
     </p>
 
   <p>
-    <input type="hidden" name="posted" value="new" >
     <input type="hidden" name="token" value="[% csrf_token %]" >
     <input type="submit" class="btn" name="Create category" value="[% contact.in_storage ? loc('Save changes') : loc('Create category') %]" >
   </p>

@@ -66,43 +66,12 @@ a, .fake-link {
 // Front page
 
 #front-main {
-    text-align: left;
     h1 {
         font-size: 1.7em;
     }
     h2 {
         margin: 0;
         font-size: 1.1em;
-    }
-
-    #geolocate_link {
-        background-color: $bathnes-white;
-
-        &:hover {
-            background-color:  lighten($bathnes-primary, 45%);
-            color: lighten($bathnes-black, 15%);
-        }
-
-        &:focus {
-            background-color: $bathnes-yellow;
-        }
-    }
-}
-
-#front-main #postcodeForm {
-    margin-top: 1em;
-    background-color: #fff;
-
-    div {
-        margin-left: 0;
-    }
-
-    label {
-        color: $primary_b;
-    }
-
-    .form-hint {
-        color: #313131;
     }
 }
 

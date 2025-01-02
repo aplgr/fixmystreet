@@ -1,12 +1,27 @@
+use FixMyStreet;
+BEGIN { FixMyStreet->test_mode(1); }
+
 package FixMyStreet::Cobrand::HounslowNoName;
 use base 'FixMyStreet::Cobrand::UK';
 
 sub council_area_id { 2483 };
 
+package FixMyStreet::Cobrand::Overrides;
+use base 'FixMyStreet::Cobrand::UK';
+
+sub new_report_title_field_label { "cobrand title label" }
+
+sub new_report_title_field_hint { "cobrand title hint" }
+
+sub new_report_detail_field_label { "cobrand detail label" }
+
+sub new_report_detail_field_hint { "cobrand detail hint" }
+
 package main;
 
 use Test::Deep;
 use Test::MockModule;
+use Test::MockTime qw(:all);
 use FixMyStreet::TestMech;
 
 # disable info logs for this test run
@@ -28,7 +43,7 @@ for my $body (
     { area_id => 2483, name => 'Hounslow Borough Council', cobrand => 'hounslow' },
 ) {
     my $extra = { cobrand => $body->{cobrand} } if $body->{cobrand};
-    my $body_obj = $mech->create_body_ok($body->{area_id}, $body->{name}, {}, $extra);
+    my $body_obj = $mech->create_body_ok($body->{area_id}, $body->{name}, $extra);
     $body_ids{$body->{area_id}} = $body_obj->id;
 }
 
@@ -665,9 +680,9 @@ subtest "category groups" => sub {
         my $div = '<div[^>]*>\s*';
         my $div_end = '</div>\s*';
         my $pavements_label = '<label[^>]* for="category_Pavements">Pavements</label>\s*' . $div_end;
-        my $pavements_input = '<input[^>]* value="Pavements" data-subcategory="Pavements">\s*';
-        my $pavements_input_checked = '<input[^>]* value="Pavements" data-subcategory="Pavements" checked>\s*';
-        my $roads = $div . '<input[^>]* value="Roads" data-subcategory="Roads">\s*<label[^>]* for="category_Roads">Roads</label>\s*' . $div_end;
+        my $pavements_input = '<input[^>]* value="G|Pavements"\s+data-subcategory="Pavements">\s*';
+        my $pavements_input_checked = '<input[^>]* value="G|Pavements"\s+data-subcategory="Pavements" checked>\s*';
+        my $roads = $div . '<input[^>]* value="G|Roads"\s+data-subcategory="Roads">\s*<label[^>]* for="category_Roads">Roads</label>\s*' . $div_end;
         my $trees_label = '<label [^>]* for="category_\d+">Trees</label>\s*' . $div_end;
         my $trees_input = $div . '<input[^>]* value=\'Trees\'>\s*';
         my $trees_input_checked = $div . '<input[^>]* value=\'Trees\' checked>\s*';
@@ -693,18 +708,28 @@ subtest "category groups" => sub {
         $mech->content_like(qr{$fieldset_pavements$options});
         $mech->content_like(qr{$fieldset_roads$options});
         # Server submission of pavement subcategory
-        $mech->get_ok("/report/new?lat=$saved_lat&lon=$saved_lon&category=Pavements&category.Pavements=Potholes");
+        $mech->get_ok("/report/new?lat=$saved_lat&lon=$saved_lon&category=G|Pavements&category.Pavements=Potholes");
         $mech->content_like(qr{$pavements_input_checked$pavements_label$roads$trees_input$trees_label</fieldset>});
         $mech->content_like(qr{$fieldset_pavements$optionsS});
         $mech->content_like(qr{$fieldset_roads$options});
 
         $contact9->update( { extra => { group => 'Lights' } } );
         $mech->get_ok("/report/new?lat=$saved_lat&lon=$saved_lon");
-        $streetlighting = $div . '<input[^>]*value=\'Street lighting\'>\s*<label[^>]* for="category_\d+">Street lighting</label>\s*' . $div_end;
+        $streetlighting = $div . '<input[^>]*value=\'H|Lights\|Street lighting\'>\s*<label[^>]* for="category_\d+">Street lighting</label>\s*' . $div_end;
+        $potholes_input = $div . '<input[^>]* value=\'H|Pavements\|Potholes\'>\s*';
         $potholes_label = '<label[^>]* for="category_\d+">Potholes</label>\s*' . $div_end;
         $mech->content_like(qr{$potholes_input$potholes_label$roads$streetlighting$trees_input$trees_label</fieldset>});
         $mech->content_unlike(qr{$fieldset_pavements});
         $mech->content_like(qr{$fieldset_roads$options});
+
+        $mech->submit_form_ok({ with_fields => {
+            category => 'H|Lights|Street lighting',
+            title => 'Test Report',
+            detail => 'Test report details',
+            username_register => 'jo@example.org',
+            name => 'Jo Bloggs',
+        } });
+        $mech->content_contains('Now check your email');
     };
 };
 
@@ -939,6 +964,20 @@ for my $test (
             },
         ],
         user_title => 'MR',
+    },
+    {
+        desc  => 'PCSO title shown for bromley problem on main site',
+        host  => 'www.fixmystreet.com',
+        postcode => 'BR1 3UH',
+        fms_extra_title => 'PCSO',
+        extra => [
+            {
+                name        => 'fms_extra_title',
+                value       => 'PCSO',
+                description => 'FMS_EXTRA_TITLE',
+            },
+        ],
+        user_title => 'PCSO',
     },
     {
         desc =>
@@ -1194,7 +1233,7 @@ subtest "test Hart" => sub {
             is $report->bodies_str, $body_ids{$test->{council}};
 
             if ( $test->{confirm} ) {
-                is $mech->uri->path, "/report/new";
+                is $mech->uri->path, "/report/confirmation/" . $report->id;
                 my $base = 'www.fixmystreet.com';
                 $base = '"' unless $test->{national};
                 $mech->content_contains("$base/report/" . $report->id, "links to correct site");
@@ -1255,6 +1294,67 @@ subtest "test Hart" => sub {
     }
 };
 
+subtest "report confirmation page" => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ { fixmystreet => '.' } ],
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        my ($report, $report2) = $mech->create_problems_for_body(2, $body_ids{2226}, 'Title',{
+            category => 'Potholes', cobrand => 'fixmystreet',
+            dt => DateTime->now(time_zone => FixMyStreet->time_zone || FixMyStreet->local_time_zone),
+        });
+        $report->discard_changes;
+
+        my $token = $report->confirmation_token;
+
+        subtest "going to confirmation page with valid token works" => sub {
+            $mech->get_ok("/report/confirmation/" . $report->id . "?token=$token");
+            $mech->content_contains($report->title);
+            $mech->content_contains("Thank you for reporting this issue!");
+        };
+
+        subtest "going to confirmation page without token shows 404" => sub {
+            $mech->get("/report/confirmation/" . $report->id);
+            is $mech->res->code, 404, "got 404";
+            $mech->content_lacks($report->title);
+            $mech->content_lacks("Thank you for reporting this issue!");
+        };
+
+        subtest "going to this page with invalid token shows 404" => sub {
+            $mech->get("/report/confirmation/" . $report->id . "?token=blahblah");
+            is $mech->res->code, 404, "got 404";
+            $mech->content_lacks($report->title);
+            $mech->content_lacks("Thank you for reporting this issue!");
+        };
+
+        subtest "unconfirming the report and going to its confirmation page shows the 'check email' message" => sub {
+            $report->update({ confirmed => undef });
+            $mech->get_ok("/report/confirmation/" . $report->id . "?token=$token");
+            $mech->content_contains("Nearly done! Now check your email");
+            $mech->content_lacks($report->title);
+            $mech->content_lacks("Thank you for reporting this issue!");
+        };
+
+        subtest "going to another report page with this valid token shows 404" => sub {
+            $mech->get("/report/confirmation/" . $report2->id . "?token=$token");
+            is $mech->res->code, 404, "got 404";
+            $mech->content_lacks($report->title);
+            $mech->content_lacks("Thank you for reporting this issue!");
+        };
+
+        subtest "going to confirmation page now redirects to the report page" => sub {
+            # make report 10 minutes old and regenerate token
+            my $created = $report->created->subtract({ minutes => 45 });
+            $report->update({ created => $created, confirmed => $created });
+            $token = $report->confirmation_token;
+            $mech->get_ok("/report/confirmation/" . $report->id . "?token=$token");
+            is $mech->res->code, 200, "got 200";
+            is $mech->res->previous->code, 302, "got 302 for redirect";
+            is $mech->uri->path, '/report/' . $report->id, 'redirected to report page';
+        };
+    };
+};
+
 subtest "categories from deleted bodies shouldn't be visible for new reports" => sub {
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => [ { fixmystreet => '.' } ],
@@ -1273,30 +1373,91 @@ subtest "categories from deleted bodies shouldn't be visible for new reports" =>
     };
 };
 
-subtest "extra google analytics code displayed on logged in problem creation" => sub {
+subtest "check field overrides for categories" => sub {
+    my $body = $mech->create_body_ok(2238, "A", { cobrand => "overrides" });
+    my $contact = $mech->create_contact_ok(
+        body_id => $body->id,
+        category => 'test',
+        email => 'test@example.org',
+    );
+    my $lat = "52.855684";
+    my $long = "-2.723877";
+
+    my $json_response;
+
+    # Cobrand level overrides apply when the category has a single body with that cobrand.
+
     FixMyStreet::override_config {
-        ALLOWED_COBRANDS => [ { fixmystreet => '.' } ],
-        BASE_URL => 'https://www.fixmystreet.com',
+        ALLOWED_COBRANDS => 'overrides',
         MAPIT_URL => 'http://mapit.uk/',
     }, sub {
-        # check that the user does not exist
-        my $test_email = 'test-2@example.com';
+        $json_response = $mech->get_ok_json( '/report/new/ajax?w=1&latitude=' . $lat . '&longitude=' . $long );
+    };
+    is $json_response->{by_category}->{test}->{title_label}, "cobrand title label", "cobrand title label applied";
+    is $json_response->{by_category}->{test}->{title_hint}, "cobrand title hint", "cobrand title hint override applied";
+    is $json_response->{by_category}->{test}->{detail_label}, "cobrand detail label", "cobrand detail label override applied";
+    is $json_response->{by_category}->{test}->{detail_hint}, "cobrand detail hint", "cobrand detail hint override applied";
 
-        $mech->clear_emails_ok;
-        my $user = $mech->log_in_ok($test_email);
+    # Contact level overrides supersede cobrand level ones.
 
-        # setup the user.
-        ok $user->update(
-            {
-                name  => 'Test User',
-                phone => '01234 567 890',
-            }
-          ),
-          "set users details";
+    $contact->set_extra_metadata('title_hint', 'contact title hint');
+    $contact->set_extra_metadata('detail_label', 'contact detail label');
+    $contact->set_extra_metadata('detail_hint', 'contact detail hint');
+    $contact->update;
 
-        # submit initial pc form
-        $mech->get_ok('/around');
-        $mech->submit_form_ok( { with_fields => { pc => 'GL50 2PR', } },
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => 'overrides',
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        $json_response = $mech->get_ok_json( '/report/new/ajax?w=1&latitude=' . $lat . '&longitude=' . $long );
+    };
+    is $json_response->{by_category}->{test}->{title_label}, "cobrand title label", "cobrand title label override applied";
+    is $json_response->{by_category}->{test}->{title_hint}, "contact title hint", "contact title hint override applied";
+    is $json_response->{by_category}->{test}->{detail_label}, "contact detail label", "contact detail label override applied";
+    is $json_response->{by_category}->{test}->{detail_hint}, "contact detail hint", "contact detail hint override applied";
+
+    # Cobrand level overrides don't apply if the category has multiple bodies.
+
+    $contact->unset_extra_metadata('title_hint');
+    $contact->unset_extra_metadata('detail_label');
+    $contact->unset_extra_metadata('detail_hint');
+    $contact->update;
+
+    my $second_body = $mech->create_body_ok(2238, "B", {});
+    my $second_contact = $mech->create_contact_ok(
+        body_id => $second_body->id,
+        category => 'test',
+        email => 'test@example.org',
+    );
+
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => 'overrides',
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        $json_response = $mech->get_ok_json( '/report/new/ajax?w=1&latitude=' . $lat . '&longitude=' . $long );
+    };
+    is $json_response->{by_category}->{test}->{title_label}, undef, "cobrand title label override not applied";
+    is $json_response->{by_category}->{test}->{title_hint}, undef, "title hint override not applied";
+    is $json_response->{by_category}->{test}->{detail_label}, undef, "detail label override not applied";
+    is $json_response->{by_category}->{test}->{detail_hint}, undef, "detail hint override not applied";
+};
+
+subtest "confirmation links log a user in within 30 seconds of first use" => sub {
+    $mech->log_out_ok;
+    $mech->clear_emails_ok;
+
+    set_fixed_time('2023-08-03T17:00:00Z');
+
+    my $test_email = 'confirmation-links-test@example.com';
+    my $user = $mech->create_user_ok($test_email);
+
+    # submit form
+    $mech->get_ok('/around');
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ { fixmystreet => '.' } ],
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        $mech->submit_form_ok( { with_fields => { pc => 'EH1 1BB', } },
             "submit location" );
 
         # click through to the report page
@@ -1305,82 +1466,42 @@ subtest "extra google analytics code displayed on logged in problem creation" =>
 
         $mech->submit_form_ok(
             {
+                button      => 'submit_register',
                 with_fields => {
-                    title         => "Test Report at café",
+                    title         => 'Test Report',
                     detail        => 'Test report details.',
                     photo1        => '',
+                    username_register => $user->email,
                     name          => 'Joe Bloggs',
-                    may_show_name => '1',
-                    phone         => '07903 123 456',
-                    category      => 'Trees',
+                    category      => 'Street lighting',
                 }
             },
             "submit good details"
         );
-
-        # find the report
-        my $report = $user->problems->first;
-        ok $report, "Found the report";
-
-        $mech->content_contains( "'id': 'report/" . $report->id . "'", 'extra google code present' );
-
-        # cleanup
-        $mech->delete_user($user);
     };
-};
+    my $email = $mech->get_email;
+    ok $email, "got an email";
+    like $mech->get_text_body_from_email($email), qr/confirm that you want to send your\s+report/i, "confirm the problem";
 
-subtest "extra google analytics code displayed on email confirmation problem creation" => sub {
-    FixMyStreet::override_config {
-        ALLOWED_COBRANDS => [ { fixmystreet => '.' } ],
-        BASE_URL => 'https://www.fixmystreet.com',
-        MAPIT_URL => 'http://mapit.uk/',
-    }, sub {
-        $mech->log_out_ok;
-        $mech->clear_emails_ok;
+    my $url = $mech->get_link_from_email($email);
 
-        $mech->get_ok('/');
-        $mech->submit_form_ok( { with_fields => { pc => 'GL50 2PR' } },
-            "submit location" );
-        $mech->follow_link_ok(
-            { text_regex => qr/skip this step/i, },
-            "follow 'skip this step' link"
-        );
+    # first visit
+    $mech->get_ok($url);
+    $mech->logged_in_ok;
+    $mech->log_out_ok;
 
-        my $fields = $mech->visible_form_values('mapSkippedForm');
-        my $submission_fields = {
-            title             => "Test Report",
-            detail            => 'Test report details.',
-            photo1            => '',
-            username_register => 'firstlast@example.com',
-            name              => 'Test User',
-            may_show_name     => '1',
-            phone             => '07903 123 456',
-            category          => 'Trees',
-            password_register => '',
-        };
+    # immediately again...
+    $mech->get_ok($url);
+    $mech->logged_in_ok;
+    $mech->log_out_ok;
 
-        $mech->submit_form_ok( { with_fields => $submission_fields },
-            "submit good details" );
+    # after 30 seconds...
+    set_fixed_time('2023-08-03T17:00:31Z');
+    $mech->get_ok($url);
+    $mech->not_logged_in_ok;
 
-        my $email = $mech->get_email;
-        ok $email, "got an email";
-        like $mech->get_text_body_from_email($email), qr/confirm that you want to/i, "confirm the problem";
-
-        my $url = $mech->get_link_from_email($email);
-
-        # confirm token in order to update the user details
-        $mech->get_ok($url);
-
-        # find the report
-        my $user = FixMyStreet::DB->resultset('User')->find( { email => 'firstlast@example.com' } );
-
-        my $report = $user->problems->first;
-        ok $report, "Found the report";
-
-        $mech->content_contains( "'id': 'report/" . $report->id . "'", 'extra google code present' );
-
-        $mech->delete_user($user);
-    };
+    # cleanup
+    $mech->delete_user($user);
 };
 
 done_testing();

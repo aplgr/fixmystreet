@@ -29,7 +29,7 @@
   padding: 0em 0.5em;
   margin-#{$left}: 0.25em;
   background-color: $primary;
-  @include border-radius(0 0 0.375em 0.375em);
+  border-radius: 0 0 0.375em 0.375em;
   a {
     background-color: transparent;
     color: $primary_text;
@@ -62,7 +62,6 @@ body.frontpage {
 }
 
 #front-main {
-  background-color: $white;
   padding: 50px 0;
   border-bottom: 3px solid $light_green;
   label {
@@ -73,19 +72,6 @@ body.frontpage {
   h1 {
       font-size: 40px;
       font-weight: 600;
-  }
-
-  #postcodeForm {
-      overflow: visible;
-      margin: 0;
-
-      div {
-          margin: 0;
-      }
-    }
-
-  #front-main-container {
-      padding: 0 1em;
   }
 }
 

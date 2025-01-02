@@ -2,7 +2,9 @@ use CGI::Simple;
 use Test::MockModule;
 use Test::MockTime qw(:all);
 use Test::Output;
+use File::Temp 'tempdir';
 use FixMyStreet::TestMech;
+use FixMyStreet::Script::CSVExport;
 use FixMyStreet::Script::Reports;
 use FixMyStreet::SendReport::Open311;
 use Catalyst::Test 'FixMyStreet::App';
@@ -20,7 +22,16 @@ my $ukc = Test::MockModule->new('FixMyStreet::Cobrand::UKCouncils');
 $ukc->mock('lookup_site_code', sub {
     my ($self, $row, $buffer) = @_;
     is $row->latitude, 51.408484, 'Correct latitude';
-    return "Road ID";
+    return {
+        type => "Feature",
+        properties => {
+            "NSG_REF" => "Road ID",
+            "ADDRESS" => "POSTAL CLOSE",
+            "TOWN" => "BEXLEY",
+            "UPRN" => "UPRN",
+        },
+        "geometry" => {},
+    };
 });
 
 FixMyStreet::override_config {
@@ -40,7 +51,7 @@ my $mech = FixMyStreet::TestMech->new;
 
 
 my $body = $mech->create_body_ok(2494, 'London Borough of Bexley', {
-    send_method => 'Open311', api_key => 'key', 'endpoint' => 'e', 'jurisdiction' => 'j' }, { cobrand => 'bexley' });
+    send_method => 'Open311', api_key => 'key', 'endpoint' => 'e', 'jurisdiction' => 'j', cobrand => 'bexley' });
 $mech->create_contact_ok(body_id => $body->id, category => 'Abandoned and untaxed vehicles', email => "ConfirmABAN");
 $mech->create_contact_ok(body_id => $body->id, category => 'Lamp post', email => "StreetLightingLAMP");
 $mech->create_contact_ok(body_id => $body->id, category => 'Gulley covers', email => "GULL");
@@ -51,6 +62,8 @@ $mech->create_contact_ok(body_id => $body->id, category => 'Graffiti', email => 
 my $da = $mech->create_contact_ok(body_id => $body->id, category => 'Dead animal', email => "ANIM");
 $mech->create_contact_ok(body_id => $body->id, category => 'Street cleaning and litter', email => "STREET");
 $mech->create_contact_ok(body_id => $body->id, category => 'Something dangerous', email => "DANG", group => 'Danger things');
+$mech->create_contact_ok(body_id => $body->id, category => 'Carriageway', email => "CARRIAGEWAY", group => 'Flytipping');
+$mech->create_contact_ok(body_id => $body->id, category => 'Obstructions on pavements and roads', email => "OBSTR");
 
 $da->set_extra_fields({
     code => 'message',
@@ -62,10 +75,12 @@ $da->set_extra_fields({
 });
 $da->update;
 
+my $UPLOAD_DIR = tempdir( CLEANUP => 1 );
 FixMyStreet::override_config {
     ALLOWED_COBRANDS => [ 'bexley' ],
     MAPIT_URL => 'http://mapit.uk/',
     STAGING_FLAGS => { send_reports => 1, skip_checks => 0 },
+    PHOTO_STORAGE_OPTIONS => { UPLOAD_DIR => $UPLOAD_DIR },
     COBRAND_FEATURES => {
         open311_email => { bexley => {
             p1 => 'p1@bexley',
@@ -110,13 +125,18 @@ FixMyStreet::override_config {
             extra => { 'name' => 'burnt', description => 'Was it burnt?', 'value' => 'Yes' } },
         { category => 'Abandoned and untaxed vehicles', code => 'ConfirmABAN',
             extra => { 'name' => 'burnt', description => 'Was it burnt?', 'value' => 'No' } },
-        { category => 'Dead animal', email => ['p1', 'outofhours', 'ooh2'], code => 'ANIM' },
+        { category => 'Dead animal', email => ['p1'], code => 'ANIM',
+            extra => { 'name' => 'reportType', description => 'Type of animal', 'value' => 'Fox' } },
+        { category => 'Dead animal', email => ['p1', 'outofhours', 'ooh2'], code => 'ANIM',
+            extra => { 'name' => 'reportType', description => 'Type of animal', 'value' => 'Horse / Large Animal' } },
         { category => 'Something dangerous', email => ['p1', 'outofhours', 'ooh2'], code => 'DANG',
             extra => { 'name' => 'dangerous', description => 'Was it dangerous?', 'value' => 'Yes' } },
         { category => 'Something dangerous', code => 'DANG',
             extra => { 'name' => 'dangerous', description => 'Was it dangerous?', 'value' => 'No' } },
         { category => 'Street cleaning and litter', email => ['p1', 'outofhours', 'ooh2'], code => 'STREET',
-            extra => { 'name' => 'reportType', description => 'Type of report', 'value' => 'Oil spillage' } },
+            extra => { 'name' => 'reportType', description => 'Type of report', 'value' => 'Oil Spillage' } },
+        { category => 'Street cleaning and litter', code => 'STREET',
+            extra => { 'name' => 'reportType', description => 'Type of report', 'value' => 'Litter' } },
         { category => 'Gulley covers', email => ['p1', 'outofhours', 'ooh2'], code => 'GULL',
             extra => { 'name' => 'reportType', description => 'Type of report', 'value' => 'Cover missing' } },
         { category => 'Gulley covers', code => 'GULL',
@@ -133,6 +153,23 @@ FixMyStreet::override_config {
             extra => { 'name' => 'dangerous', description => 'Was it dangerous?', 'value' => 'Yes' } },
         { category => 'Flytipping', code => 'UniformFLY', email => ['eh'] },
         { category => 'Graffiti', code => 'GRAF', email => ['p1'], extra => { 'name' => 'offensive', description => 'Is the graffiti racist or offensive?', 'value' => 'Yes' } },
+        { category => 'Carriageway', code => 'CARRIAGEWAY', },
+        { category => 'Carriageway', code => 'CARRIAGEWAY', email => ['outofhours', 'ooh2'],
+            extra => { 'name' => 'blocking', description => 'Flytipping blocking carriageway?', 'value' => 'Yes' } },
+        { category => 'Carriageway', code => 'CARRIAGEWAY', email => ['p1', 'outofhours', 'ooh2'],
+            extra => [
+                { 'name' => 'blocking', description => 'Flytipping blocking carriageway?', 'value' => 'Yes' },
+                { 'name' => 'hazardous', value => 'Yes' },
+            ],
+        },
+        { category => 'Obstructions on pavements and roads', code => 'OBSTR', email => ['p1'],
+            extra => { 'name' => 'reportType', description => 'Type of obstruction?', 'value' => 'Tables and Chairs' } },
+        { category => 'Obstructions on pavements and roads', code => 'OBSTR', email => ['p1', 'outofhours', 'ooh2'],
+            extra => [
+                { 'name' => 'reportType', description => 'Type of obstruction?', 'value' => 'Skips' },
+                { 'name' => 'issueDescription', description => 'What is the issue?', 'value' => 'Skip is not illuminated' }
+            ],
+        },
         { category => 'Flooding in the road', code => 'ConfirmFLOD', email => ['flooding'] },
     ) {
         ($report) = $mech->create_problems_for_body(1, $body->id, 'On Road', {
@@ -152,7 +189,7 @@ FixMyStreet::override_config {
             if ($test->{code} =~ /Confirm/) {
                 is $c->param('attribute[site_code]'), 'Road ID';
             } elsif ($test->{code} =~ /Uniform/) {
-                is $c->param('attribute[uprn]'), 'Road ID';
+                is $c->param('attribute[uprn]'), 'UPRN';
             } else {
                 is $c->param('attribute[NSGRef]'), 'Road ID';
             }
@@ -164,13 +201,20 @@ FixMyStreet::override_config {
                 $t = join('@[^@]*', @$t);
                 is $email->header('From'), '"Test User" <do-not-reply@example.org>';
                 like $email->header('To'), qr/^[^@]*$t@[^@]*$/;
+                my $text = $mech->get_text_body_from_email($email);
                 if ($test->{code} =~ /Confirm/) {
-                    like $mech->get_text_body_from_email($email), qr/Site code: Road ID/;
+                    like $text, qr/Site code: Road ID/;
+                    like $text, qr/Street name: Postal Close/;
+                    my $id = $report->id;
+                    like $text, qr/FMS reference: $id/;
                 } elsif ($test->{code} =~ /Uniform/) {
-                    like $mech->get_text_body_from_email($email), qr/UPRN: Road ID/;
-                    like $mech->get_text_body_from_email($email), qr/Uniform ID: 248/;
+                    like $text, qr/UPRN: UPRN/;
+                    like $text, qr/Uniform ID: 248/;
+                    like $text, qr/Street name: Postal Close/;
                 } else {
-                    like $mech->get_text_body_from_email($email), qr/NSG Ref: Road ID/;
+                    like $text, qr/NSG Ref: Road ID/;
+                    like $text, qr/Street name: Postal Close/;
+                    like $text, qr/Street area: Bexley/;
                 }
                 $mech->clear_emails_ok;
             } else {
@@ -207,12 +251,35 @@ FixMyStreet::override_config {
         is $c->param('service_code'), 'StreetLightingLAMP', 'Report resent';
     };
 
-    subtest 'extra CSV column present' => sub {
+    subtest 'extra CSV columns present, and questionnaire answers work' => sub {
+        my $report = FixMyStreet::DB->resultset("Problem")->first;
+        my $fly = FixMyStreet::DB->resultset("Problem")->search({ category => 'Flytipping' })->single;
+        $fly->update({ confirmed => $fly->confirmed->clone->subtract(days => 2), state => 'fixed - user' });
+
+        FixMyStreet::DB->resultset("Questionnaire")->create({
+            problem => $fly,
+            whensent => $fly->confirmed,
+            whenanswered => $fly->confirmed->clone->add(hours => 1),
+            old_state => 'confirmed',
+            new_state => 'fixed - user',
+        });
+
         $mech->get_ok('/dashboard?export=1');
         $mech->content_contains(',Category,Subcategory,');
         $mech->content_contains('"Danger things","Something dangerous"');
-    };
+        $mech->content_contains(',"User Email"');
+        $mech->content_contains(',' . $report->user->email);
+        $mech->content_like(qr/Flytipping,,[^,]*,2019-10-14T17:00:00,,2019-10-14T18:00:00,,"fixed - user"/);
 
+        FixMyStreet::Script::CSVExport::process(dbh => FixMyStreet::DB->schema->storage->dbh);
+
+        $mech->get_ok('/dashboard?export=1');
+        $mech->content_contains(',Category,Subcategory,');
+        $mech->content_contains('"Danger things","Something dangerous"');
+        $mech->content_contains(',"User Email"');
+        $mech->content_contains(',' . $report->user->email);
+        $mech->content_like(qr/Flytipping,,[^,]*,2019-10-14T17:00:00,,2019-10-14T18:00:00,,"fixed - user"/);
+    };
 
     subtest 'testing special Open311 behaviour', sub {
         my @reports = $mech->create_problems_for_body( 1, $body->id, 'Test', {
@@ -339,15 +406,15 @@ FixMyStreet::override_config {
         $mech->content_contains('Report ref:&nbsp;' . $report->id);
     };
 
-    subtest 'phishing warning is shown for new reports' => sub {
+    subtest 'phishing warning is removed for new reports' => sub {
         $mech->log_out_ok;
         $mech->get_ok('/report/new?longitude=0.15356&latitude=51.45556&category=Lamp+post');
-        $mech->content_contains('if asked for personal information, please do not respond');
+        $mech->content_lacks('if asked for personal information, please do not respond');
     };
 
-    subtest 'phishing warning is shown on report pages' => sub {
+    subtest 'phishing warning is removed on report pages' => sub {
         $mech->get_ok('/report/' . $report->id);
-        $mech->content_contains('if asked for personal information, please do not respond');
+        $mech->content_lacks('if asked for personal information, please do not respond');
     };
 
     subtest "test ID in update email" => sub {
@@ -370,19 +437,6 @@ FixMyStreet::override_config {
         }, "submit details");
         like $mech->get_text_body_from_email, qr/The report's reference number is $id/, 'Update confirmation email contains id number';
 };
-
-subtest 'test ID in questionnaire email' => sub {
-        $mech->clear_emails_ok;
-        (my $report) = $mech->create_problems_for_body(1, $body->id, 'On Road', {
-            category => 'Lamp post', cobrand => 'bexley',
-            latitude => 51.408484, longitude => 0.074653, areas => '2494',
-            whensent => DateTime->now->subtract(years => 1),
-        });
-        FixMyStreet::DB->resultset('Questionnaire')->send_questionnaires();
-        my $text = $mech->get_text_body_from_email;
-        my $id = $report->id;
-        like $text, qr/The report's reference number is $id/, 'Questionnaire email contains id number';
-    };
 };
 
 subtest 'nearest road returns correct road' => sub {
@@ -468,8 +522,8 @@ EOF
     is $cobrand->_is_out_of_hours(), 1, 'out of hours at weekends';
     set_fixed_time('2019-12-25T12:00:00Z');
     is $cobrand->_is_out_of_hours(), 1, 'out of hours on bank holiday';
-    set_fixed_time('2022-12-28T12:00:00Z');
-    is $cobrand->_is_out_of_hours(), 1, 'out of hours on special day 2022';
+    set_fixed_time('2024-12-27T12:00:00Z');
+    is $cobrand->_is_out_of_hours(), 1, 'out of hours on special day 2024';
 };
 
 

@@ -6,9 +6,10 @@
 
 (function(){
 
+var tilma_host = fixmystreet.staging ? 'tilma.staging.mysociety.org' : 'tilma.mysociety.org';
 var roadworks_defaults = {
     http_options: {
-        url: "https://tilma.mysociety.org/streetmanager.php"
+        url: "https://" + tilma_host + "/streetmanager.php"
     },
     srsName: "EPSG:27700",
     format_class: OpenLayers.Format.GeoJSON,
@@ -17,7 +18,6 @@ var roadworks_defaults = {
     always_visible: true,
     nearest_radius: 100,
     road: true,
-    all_categories: true,
     actions: {
         found: function(layer, feature) {
             if (fixmystreet.roadworks.filter(feature)) {

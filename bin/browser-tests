@@ -14,9 +14,11 @@ BEGIN {
     $cobrand = [qw(
         bathnes
         borsetshire
+        brent
         bromley
         buckinghamshire
         fixmystreet
+        gloucestershire
         hackney
         highwaysengland
         hounslow
@@ -27,6 +29,7 @@ BEGIN {
         oxfordshire
         peterborough
         shropshire
+        surrey
         tfl
         westminster
     )];

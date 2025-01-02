@@ -1,3 +1,6 @@
+use FixMyStreet;
+BEGIN { FixMyStreet->test_mode(1); }
+
 package FixMyStreet::Cobrand::Dummy;
 use parent 'FixMyStreet::Cobrand::Default';
 
@@ -7,6 +10,10 @@ package main;
 
 use Test::MockModule;
 use FixMyStreet::TestMech;
+
+FixMyStreet::App->log->disable('info');
+END { FixMyStreet::App->log->enable('info'); }
+
 my $mech = FixMyStreet::TestMech->new;
 
 my $resolver = Test::MockModule->new('Email::Valid');

@@ -1,4 +1,3 @@
-use utf8;
 use Test::MockModule;
 use Test::MockTime qw(:all);
 use FixMyStreet::TestMech;
@@ -9,7 +8,9 @@ END { FixMyStreet::App->log->enable('info'); }
 
 my $mech = FixMyStreet::TestMech->new;
 
-my $body = $mech->create_body_ok(2482, 'Bromley Council', {}, { cobrand => 'bromley' });
+my $body = $mech->create_body_ok(2482, 'Bromley Council', { cobrand => 'bromley' }, {
+    wasteworks_config => { request_timeframe => "two weeks" }
+});
 my $user = $mech->create_user_ok('test@example.net', name => 'Normal User');
 $user->update({ phone => "07123 456789" });
 my $nameless_user = $mech->create_user_ok('nameless@example.net', name => '');
@@ -125,13 +126,15 @@ FixMyStreet::override_config {
         $mech->submit_form_ok({ with_fields => { address => '12345' } });
         $mech->content_contains('2 Example Street');
         $mech->content_contains('Food Waste');
-        $mech->content_contains('every other Monday');
+        # $mech->content_contains('every other Monday');
     };
     subtest 'Thing already requested' => sub {
         $mech->content_contains('A food waste collection has been reported as missed');
         $mech->content_contains('A paper &amp; cardboard collection has been reported as missed'); # as part of service unit, not property
     };
     subtest 'Report a missed bin' => sub {
+        my $cobrand = Test::MockModule->new('FixMyStreet::Cobrand::Bromley');
+        $cobrand->mock('send_questionnaires', sub { 1 }); # To test that questionnaires aren't sent, despite being enabled on the cobrand.
         $mech->content_contains('service-531', 'Can report, last collection was 27th');
         $mech->content_lacks('service-537', 'Cannot report, last collection was 27th but the service unit has a report');
         $mech->content_lacks('service-535', 'Cannot report, last collection was 20th');
@@ -146,7 +149,7 @@ FixMyStreet::override_config {
         $mech->submit_form_ok({ with_fields => { 'service-531' => 1 } });
         $mech->submit_form_ok({ with_fields => { name => "Test" } });
         $mech->content_contains('Please enter your full name');
-        $mech->content_contains('Please provide email and/or phone');
+        $mech->content_contains('Please provide an email address');
         $mech->submit_form_ok({ with_fields => { name => "Test McTest", phone => '+441234567890' } });
         $mech->content_contains('Please provide an email address');
         $mech->submit_form_ok({ with_fields => { name => "Test McTest", email => 'test@example.org' } });
@@ -176,7 +179,7 @@ FixMyStreet::override_config {
 
         $mech->clear_emails_ok;
         $mech->get_ok($link);
-        $mech->content_contains('Your missed collection has been reported');
+        $mech->content_contains('Thank you for reporting a missed collection');
         $mech->content_contains('Show upcoming bin days');
         $mech->content_contains('/waste/12345"');
         FixMyStreet::Script::Reports::send();
@@ -188,6 +191,9 @@ FixMyStreet::override_config {
 
         is $user->alerts->count, 1;
         $mech->clear_emails_ok;
+
+        my $report = FixMyStreet::DB->resultset("Problem")->order_by('-id')->first;
+        is $report->send_questionnaire, 0;
     };
     subtest 'About You form is pre-filled when logged in' => sub {
         $mech->log_in_ok($user->email);
@@ -210,11 +216,7 @@ FixMyStreet::override_config {
     subtest 'Check report visibility' => sub {
         my $report = FixMyStreet::DB->resultset("Problem")->first;
         $report->update({ geocode => {
-            resourceSets => [ {
-                resources => [ {
-                    name => '12 A Street, XX1 1SZ',
-                } ]
-            } ]
+            display_name => '12 A Street, XX1 1SZ',
         } });
         my $res = $mech->get('/report/' . $report->id);
         is $res->code, 403;
@@ -252,9 +254,10 @@ FixMyStreet::override_config {
         $mech->content_contains($user->email);
         $mech->submit_form_ok({ with_fields => { process => 'summary' } });
         $mech->content_contains('Your container request has been sent');
+        $mech->content_contains('Containers typically arrive within two weeks,');
         $mech->content_contains('Show upcoming bin days');
         $mech->content_contains('/waste/12345"');
-        my $report = FixMyStreet::DB->resultset("Problem")->search(undef, { order_by => { -desc => 'id' } })->first;
+        my $report = FixMyStreet::DB->resultset("Problem")->order_by('-id')->first;
         is $report->get_extra_field_value('uprn'), 1000000002;
         is $report->get_extra_field_value('Quantity'), 2;
         is $report->get_extra_field_value('Container_Type'), 1;
@@ -275,7 +278,7 @@ FixMyStreet::override_config {
         $mech->content_contains('Your container request has been sent');
         $mech->content_contains('Show upcoming bin days');
         $mech->content_contains('/waste/12345"');
-        my $report = FixMyStreet::DB->resultset("Problem")->search(undef, { order_by => { -desc => 'id' } })->first;
+        my $report = FixMyStreet::DB->resultset("Problem")->order_by('-id')->first;
         is $report->title, 'Request new Garden Waste Container';
         is $report->get_extra_field_value('uprn'), 1000000002;
         is $report->get_extra_field_value('Quantity'), 1;
@@ -288,8 +291,8 @@ FixMyStreet::override_config {
         $mech->get_ok('/waste/12345/request');
         $mech->submit_form_ok({ with_fields => { 'container-9' => 1, 'quantity-9' => 2, 'container-10' => 1, 'quantity-10' => 1 } });
         $mech->submit_form_ok({ with_fields => { name => "Test McTest", email => $user->email } });
-        $mech->content_like(qr{Outside Food Waste Container</dt>\s*<dd[^>]*>1</dd>});
-        $mech->content_like(qr{Kitchen Caddy</dt>\s*<dd[^>]*>2</dd>});
+        $mech->content_like(qr{Outside Food Waste Container</dt>\s*<dd[^>]*>\s*1\s*</dd>});
+        $mech->content_like(qr{Kitchen Caddy</dt>\s*<dd[^>]*>\s*2\s*</dd>});
         $mech->submit_form_ok({ with_fields => { process => 'summary' } });
         $mech->content_contains('Now check your email');
         my $link = $mech->get_link_from_email; # Only one email sent, this also checks
@@ -302,8 +305,8 @@ FixMyStreet::override_config {
         is $emails[0]->header('To'), '"Bromley Council" <request@example.org>';
         is $emails[1]->header('To'), $user->email;
         my $body = $mech->get_text_body_from_email($emails[1]);
-        like $body, qr/Your report to Bromley Council has been logged/;
-        my @reports = FixMyStreet::DB->resultset("Problem")->search(undef, { order_by => { -desc => 'id' }, rows => 2 });
+        like $body, qr/Your request to Bromley Council has been logged/;
+        my @reports = FixMyStreet::DB->resultset("Problem")->order_by('-id')->search(undef, { rows => 2 });
         is $reports[0]->state, 'confirmed';
         is $reports[0]->get_extra_field_value('uprn'), 1000000002;
         is $reports[0]->get_extra_field_value('Quantity'), 2;
@@ -326,7 +329,8 @@ FixMyStreet::override_config {
         is $mech->uri->path, '/waste/12345';
     };
     subtest 'Checking calendar' => sub {
-        $mech->follow_link_ok({ text => 'Add to your calendar (.ics file)' });
+        $mech->follow_link_ok({ text => 'Add to your calendar' });
+        $mech->follow_link_ok({ text_regex => qr/this link/ });
         $mech->content_contains('BEGIN:VCALENDAR');
         my @events = split /BEGIN:VEVENT/, $mech->encoded_content;
         shift @events; # Header
@@ -349,7 +353,7 @@ FixMyStreet::override_config {
         $mech->content_contains('Your enquiry has been submitted');
         $mech->content_contains('Show upcoming bin days');
         $mech->content_contains('/waste/12345"');
-        my $report = FixMyStreet::DB->resultset("Problem")->search(undef, { order_by => { -desc => 'id' } })->first;
+        my $report = FixMyStreet::DB->resultset("Problem")->order_by('-id')->first;
         is $report->get_extra_field_value('Notes'), 'Some notes';
         is $report->detail, "Some notes\n\n2 Example Street, Bromley, BR1 1AA";
         is $report->user->email, $user->email;
@@ -372,7 +376,7 @@ FixMyStreet::override_config {
         $mech->content_contains('Your enquiry has been submitted');
         $mech->content_contains('Show upcoming bin days');
         $mech->content_contains('/waste/12345"');
-        my $report = FixMyStreet::DB->resultset("Problem")->search(undef, { order_by => { -desc => 'id' } })->first;
+        my $report = FixMyStreet::DB->resultset("Problem")->order_by('-id')->first;
         is $report->get_extra_field_value('Notes'), 'Some notes';
         is $report->detail, "Some notes\n\n2 Example Street, Bromley, BR1 1AA";
         is $report->user->email, $staff_user->email;
@@ -389,7 +393,7 @@ FixMyStreet::override_config {
         $mech->content_contains('Your enquiry has been submitted');
         $mech->content_contains('Show upcoming bin days');
         $mech->content_contains('/waste/12345"');
-        my $report = FixMyStreet::DB->resultset("Problem")->search(undef, { order_by => { -desc => 'id' } })->first;
+        my $report = FixMyStreet::DB->resultset("Problem")->order_by('-id')->first;
         is $report->get_extra_field_value('Reason'), 'Reason';
         is $report->detail, "Behind the garden gate\n\nReason\n\n2 Example Street, Bromley, BR1 1AA";
         is $report->user->email, 'anne@example.org';
@@ -666,8 +670,8 @@ FixMyStreet::override_config {
         $integ->mock(call => sub {
             return SOAP::Result->new(result => {
                 PointInfo => [
-                    { Description => '1 Example Street', Id => '11345', SharedRef => { Value => { anyType => 1000000001 } } },
-                    { Description => '2 Example Street', Id => '12345', SharedRef => { Value => { anyType => 1000000002 } } },
+                    { Description => '1 Example Street', Id => '11345', SharedRef => { Value => { anyType => '1000000001' } } },
+                    { Description => '2 Example Street', Id => '12345', SharedRef => { Value => { anyType => '1000000002' } } },
                 ],
             });
         });
@@ -823,7 +827,7 @@ FixMyStreet::override_config {
         category => 'Garden Subscription',
     });
     $p->title('Garden Subscription - New');
-    $p->update_extra_field({ name => 'property_id', value => 12345});
+    $p->update_extra_field({ name => 'property_id', value => '12345'});
     $p->update;
     $user->update({ phone => "" });
 
@@ -989,12 +993,12 @@ FixMyStreet::override_config {
         set_fixed_time('2021-04-05T17:00:00Z');
         $mech->get_ok('/waste/12345');
         $mech->content_contains('Garden Waste');
-        $mech->content_lacks('Modify your garden waste subscription');
+        $mech->content_lacks('Change your garden waste subscription');
         $mech->content_contains('Your subscription is now overdue', "overdue link if after expired");
         set_fixed_time('2021-03-05T17:00:00Z');
         $mech->get_ok('/waste/12345');
         $mech->content_contains('Your subscription is soon due for renewal', "due soon link if within 7 weeks of expiry");
-        $mech->content_lacks('Modify your garden waste subscription');
+        $mech->content_lacks('Change your garden waste subscription');
         $mech->get_ok('/waste/12345/garden_modify');
         is $mech->uri->path, '/waste/12345', 'link redirect to bin list if modify in renewal period';
         set_fixed_time('2021-02-10T17:00:00Z');
@@ -1003,7 +1007,7 @@ FixMyStreet::override_config {
         set_fixed_time('2021-02-08T17:00:00Z');
         $mech->get_ok('/waste/12345');
         $mech->content_lacks('Your subscription is soon due for renewal', "no renewal notice if over 7 weeks before expiry");
-        $mech->content_contains('Modify your garden waste subscription');
+        $mech->content_contains('Change your garden waste subscription');
         $mech->log_out_ok;
     };
 
@@ -1095,13 +1099,8 @@ FixMyStreet::override_config {
                 name => 'Test McTest',
                 email => 'test@example.net'
         } });
-        # external redirects make Test::WWW::Mechanize unhappy so clone
-        # the mech for the redirect
-        my $mech2 = $mech->clone;
-        $mech2->submit_form_ok({ with_fields => { tandc => 1 } });
-
-        is $mech2->res->previous->code, 302, 'payments issues a redirect';
-        is $mech2->res->previous->header('Location'), "http://example.org/faq", "redirects to payment gateway";
+        # external redirects make Test::WWW::Mechanize unhappy so clone the mech for the redirect
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
 
@@ -1152,13 +1151,8 @@ FixMyStreet::override_config {
         } });
         $mech->content_contains('Test McTest');
         $mech->content_contains('£20.00');
-        # external redirects make Test::WWW::Mechanize unhappy so clone
-        # the mech for the redirect
-        my $mech2 = $mech->clone;
-        $mech2->submit_form_ok({ with_fields => { tandc => 1 } });
 
-        is $mech2->res->previous->code, 302, 'payments issues a redirect';
-        is $mech2->res->previous->header('Location'), "http://example.org/faq", "redirects to payment gateway";
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
 
@@ -1201,13 +1195,8 @@ FixMyStreet::override_config {
         } });
         $mech->content_contains('Test McTest');
         $mech->content_contains('£20.00');
-        # external redirects make Test::WWW::Mechanize unhappy so clone
-        # the mech for the redirect
-        my $mech2 = $mech->clone;
-        $mech2->submit_form_ok({ with_fields => { tandc => 1 } });
 
-        is $mech2->res->previous->code, 302, 'payments issues a redirect';
-        is $mech2->res->previous->header('Location'), "http://example.org/faq", "redirects to payment gateway";
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
 
@@ -1255,8 +1244,8 @@ FixMyStreet::override_config {
 
         my ($token, $report_id) = ( $mech->content =~ m#reference\*\|\*([^*]*)\*\|\*report_id\*\|\*(\d+)"# );
         my $new_report = FixMyStreet::DB->resultset('Problem')->search( {
-                id => $report_id,
-                extra => { like => '%redirect_id,T18:'. $token . '%' }
+            id => $report_id,
+            extra => { '@>' => '{"redirect_id":"' . $token . '"}' },
         } )->first;
 
         is $new_report->category, 'Garden Subscription', 'correct category on report';
@@ -1318,7 +1307,8 @@ FixMyStreet::override_config {
         $mech->content_contains('<span id="cost_per_year">40.00');
         $mech->content_contains('<span id="pro_rata_cost">7.50');
         $mech->submit_form_ok({ with_fields => { current_bins => 1, bins_wanted => 2 } });
-        $mech->submit_form_ok({ with_fields => { tandc => 1 } });
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
+
         is $sent_params->{items}[0]{amount}, 750, 'correct amount used';
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
@@ -1367,8 +1357,7 @@ FixMyStreet::override_config {
 
         my $new_report = FixMyStreet::DB->resultset('Problem')->search(
             { user_id => $user->id },
-            { order_by => { -desc => 'id' } },
-        )->first;
+        )->order_by('-id')->first;
 
         is $new_report->category, 'Garden Subscription', 'correct category on report';
         is $new_report->title, 'Garden Subscription - Amend', 'correct title on report';
@@ -1414,8 +1403,7 @@ FixMyStreet::override_config {
 
         my $new_report = FixMyStreet::DB->resultset('Problem')->search(
             { user_id => $user->id },
-            { order_by => { -desc => 'id' } },
-        )->first;
+        )->order_by('-id')->first;
 
         is $new_report->category, 'Garden Subscription', 'correct category on report';
         is $new_report->title, 'Garden Subscription - Amend', 'correct title on report';
@@ -1454,8 +1442,7 @@ FixMyStreet::override_config {
 
         my $new_report = FixMyStreet::DB->resultset('Problem')->search(
             { user_id => $user->id },
-            { order_by => { -desc => 'id' } },
-        )->first;
+        )->order_by('-id')->first;
 
         is $new_report->category, 'Garden Subscription', 'correct category on report';
         is $new_report->title, 'Garden Subscription - Amend', 'correct title on report';
@@ -1519,8 +1506,7 @@ FixMyStreet::override_config {
 
         my $new_report = FixMyStreet::DB->resultset('Problem')->search(
             { user_id => $user->id },
-            { order_by => { -desc => 'id' } },
-        )->first;
+        )->order_by('-id')->first;
 
         is $new_report->category, 'Cancel Garden Subscription', 'correct category on report';
         is $new_report->state, 'unconfirmed', 'report confirmed';
@@ -1565,11 +1551,7 @@ FixMyStreet::override_config {
             bins_wanted => 1,
             payment_method => 'credit_card',
         } });
-
-        # external redirects make Test::WWW::Mechanize unhappy so clone
-        # the mech for the redirect
-        my $mech2 = $mech->clone;
-        $mech2->submit_form_ok({ with_fields => { tandc => 1 } });
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
         is $sent_params->{items}[0]{amount}, 2000, 'correct amount used';
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
@@ -1617,8 +1599,8 @@ FixMyStreet::override_config {
 
         my ($token, $report_id) = ( $mech->content =~ m#reference\*\|\*([^*]*)\*\|\*report_id\*\|\*(\d+)"# );
         my $new_report = FixMyStreet::DB->resultset('Problem')->search( {
-                id => $report_id,
-                extra => { like => '%redirect_id,T18:'. $token . '%' }
+            id => $report_id,
+            extra => { '@>' => '{"redirect_id":"' . $token . '"}' },
         } )->first;
 
         is $new_report->category, 'Garden Subscription', 'correct category on report';
@@ -1671,11 +1653,7 @@ FixMyStreet::override_config {
             email => 'test@example.net',
         } });
         $mech->content_contains('40.00');
-
-        # external redirects make Test::WWW::Mechanize unhappy so clone
-        # the mech for the redirect
-        my $mech2 = $mech->clone;
-        $mech2->submit_form_ok({ with_fields => { tandc => 1 } });
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
         is $sent_params->{items}[0]{amount}, 4000, 'correct amount used';
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
@@ -1720,11 +1698,7 @@ FixMyStreet::override_config {
             email => 'test@example.net',
         } });
         $mech->content_contains('20.00');
-
-        # external redirects make Test::WWW::Mechanize unhappy so clone
-        # the mech for the redirect
-        my $mech2 = $mech->clone;
-        $mech2->submit_form_ok({ with_fields => { tandc => 1 } });
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
         is $sent_params->{items}[0]{amount}, 2000, 'correct amount used';
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
@@ -1772,11 +1746,7 @@ FixMyStreet::override_config {
             email => 'test@example.net',
         } });
         $mech->content_contains('20.00');
-
-        # external redirects make Test::WWW::Mechanize unhappy so clone
-        # the mech for the redirect
-        my $mech2 = $mech->clone;
-        $mech2->submit_form_ok({ with_fields => { tandc => 1 } });
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
         is $sent_params->{items}[0]{amount}, 2000, 'correct amount used';
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
@@ -1824,7 +1794,8 @@ FixMyStreet::override_config {
             email => 'test@example.net',
         } });
         $mech->content_contains('40.00');
-        $mech->submit_form_ok({ with_fields => { tandc => 1 } });
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
+
         is $sent_params->{items}[0]{amount}, 4000, 'correct amount used';
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
@@ -1850,8 +1821,7 @@ FixMyStreet::override_config {
 
         my $new_report = FixMyStreet::DB->resultset('Problem')->search(
             { user_id => $user->id },
-            { order_by => { -desc => 'id' } },
-        )->first;
+        )->order_by('-id')->first;
 
         is $new_report->category, 'Cancel Garden Subscription', 'correct category on report';
         is $new_report->get_extra_field_value('Subscription_End_Date'), '2021-03-09', 'cancel date set to current date';
@@ -1901,13 +1871,8 @@ FixMyStreet::override_config {
             } });
             $mech->content_contains('Test McTest');
             $mech->content_contains('£20.00');
-            # external redirects make Test::WWW::Mechanize unhappy so clone
-            # the mech for the redirect
-            my $mech2 = $mech->clone;
-            $mech2->submit_form_ok({ with_fields => { tandc => 1 } });
 
-            is $mech2->res->previous->code, 302, 'payments issues a redirect';
-            is $mech2->res->previous->header('Location'), "http://example.org/faq", "redirects to payment gateway";
+            $mech->waste_submit_check({ with_fields => { tandc => 1 } });
 
             my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
 
@@ -1960,13 +1925,10 @@ FixMyStreet::override_config {
         } });
         $mech->content_contains('Test McTest');
         $mech->content_contains('£20.00');
-        # external redirects make Test::WWW::Mechanize unhappy so clone
-        # the mech for the redirect
-        my $mech2 = $mech->clone;
-        $mech2->submit_form_ok({ with_fields => { tandc => 1 } });
 
-        is $mech2->uri->path, '/waste/12345/garden', 'no redirect occured';
-        $mech2->content_contains('Payment failed: ERROR');
+        $mech->submit_form_ok({ with_fields => { tandc => 1 } });
+        is $mech->uri->path, '/waste/12345/garden', 'no redirect occured';
+        $mech->content_contains('Payment failed: ERROR');
 
         $pay->mock(pay => sub {
             my $self = shift;
@@ -1981,19 +1943,14 @@ FixMyStreet::override_config {
             };
         });
 
-        $mech2->submit_form_ok({ form_number => 1 });
-        is $mech2->res->previous->code, 302, 'payments issues a redirect';
-        is $mech2->res->previous->header('Location'), "http://example.org/faq", "redirects to payment gateway";
+        $mech->waste_submit_check({ form_number => 1 });
     };
 
     my $report = FixMyStreet::DB->resultset("Problem")->search({
         category => 'Garden Subscription',
         title => 'Garden Subscription - New',
-        extra => { like => '%property_id,T5:value,I5:12345%' }
-    },
-    {
-        order_by => { -desc => 'id' }
-    })->first;
+        extra => { '@>' => '{"_fields":[{"name":"property_id","value":"12345"}]}' },
+    })->order_by('-id')->first;
     $report->update_extra_field({ name => 'payment_method', value => 'direct_debit' });
     $report->update;
 
@@ -2180,10 +2137,7 @@ FixMyStreet::override_config {
         $mech->submit_form_ok({ with_fields => { confirm => 1 } });
         $mech->content_like(qr#/waste/12345">Show upcoming#, "contains link to bin page");
 
-        my $new_report = FixMyStreet::DB->resultset('Problem')->search(
-            { },
-            { order_by => { -desc => 'id' } },
-        )->first;
+        my $new_report = FixMyStreet::DB->resultset('Problem')->order_by('-id')->first;
 
         is $new_report->category, 'Cancel Garden Subscription', 'correct category on report';
         is $new_report->get_extra_field_value('Subscription_End_Date'), '2021-03-09', 'cancel date set to current date';
@@ -2204,7 +2158,7 @@ FixMyStreet::override_config {
         $mech->submit_form_ok({ form_number => 1 });
         $mech->submit_form_ok({ with_fields => { existing => 'no' } });
         $mech->content_like(qr#Total to pay now: £<span[^>]*>0.00#, "initial cost set to zero");
-        $mech->content_lacks('password', 'no password field');
+        $mech->content_lacks('name="password', 'no password field');
         $mech->submit_form_ok({ with_fields => {
                 current_bins => 0,
                 bins_wanted => 1,
@@ -2252,7 +2206,7 @@ FixMyStreet::override_config {
         $mech->submit_form_ok({ form_number => 1 });
         $mech->submit_form_ok({ with_fields => { existing => 'no' } });
         $mech->content_like(qr#Total to pay now: £<span[^>]*>0.00#, "initial cost set to zero");
-        $mech->content_lacks('password', 'no password field');
+        $mech->content_lacks('name="password', 'no password field');
         $mech->submit_form_ok({ with_fields => {
                 current_bins => 0,
                 bins_wanted => 1,
@@ -2393,11 +2347,7 @@ FixMyStreet::override_config {
         } });
         $mech->content_contains('A New Name');
         $mech->content_contains('20.00');
-
-        # external redirects make Test::WWW::Mechanize unhappy so clone
-        # the mech for the redirect
-        my $mech2 = $mech->clone;
-        $mech2->submit_form_ok({ with_fields => { tandc => 1 } });
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
         is $sent_params->{items}[0]{amount}, 2000, 'correct amount used';
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
@@ -2470,7 +2420,6 @@ FixMyStreet::override_config {
                 } },
             } ]
         } );
-        $mech->log_out_ok;
         set_fixed_time('2021-05-20T17:00:00Z'); # After sample data collection
         $mech->get_ok('/waste/12345');
         $mech->content_contains('subscription is now overdue');
@@ -2488,7 +2437,8 @@ FixMyStreet::override_config {
 
         } });
         $mech->content_contains('20.00');
-        $mech->submit_form_ok({ with_fields => { tandc => 1 } });
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
+
         is $sent_params->{items}[0]{amount}, 2000, 'correct amount used';
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
@@ -2557,7 +2507,6 @@ FixMyStreet::override_config {
                 } },
             } ]
         } );
-        $mech->log_out_ok;
         set_fixed_time('2021-05-20T17:00:00Z'); # After sample data collection
         $mech->log_in_ok($nameless_user->email);
         $mech->get_ok('/waste/12345/garden_renew');
@@ -2569,7 +2518,8 @@ FixMyStreet::override_config {
             email => 'nameless@example.net',
         } });
         $mech->content_contains('20.00');
-        $mech->submit_form_ok({ with_fields => { tandc => 1 } });
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
+
         is $sent_params->{items}[0]{amount}, 2000, 'correct amount used';
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
@@ -2617,7 +2567,8 @@ FixMyStreet::override_config {
         $mech->submit_form_ok({ with_fields => { current_bins => 1, bins_wanted => 2 } });
         $mech->content_contains('40.00');
         $mech->content_contains('7.50');
-        $mech->submit_form_ok({ with_fields => { tandc => 1 } });
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
+
         is $sent_params->{items}[0]{amount}, 750, 'correct amount used';
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
@@ -2662,7 +2613,8 @@ FixMyStreet::override_config {
         $mech->content_contains('A Name');
         $mech->content_contains('40.00');
         $mech->content_contains('7.50');
-        $mech->submit_form_ok({ with_fields => { tandc => 1 } });
+        $mech->waste_submit_check({ with_fields => { tandc => 1 } });
+
         is $sent_params->{items}[0]{amount}, 750, 'correct amount used';
 
         my ( $token, $new_report, $report_id ) = get_report_from_redirect( $sent_params->{returnUrl} );
@@ -2700,8 +2652,7 @@ FixMyStreet::override_config {
 
         my $new_report = FixMyStreet::DB->resultset('Problem')->search(
             { user_id => $user->id },
-            { order_by => { -desc => 'id' } },
-        )->first;
+        )->order_by('-id')->first;
 
         is $new_report->category, 'Cancel Garden Subscription', 'correct category on report';
         is $new_report->get_extra_field_value('Subscription_End_Date'), '2021-03-09', 'cancel date set to current date';
@@ -2760,10 +2711,10 @@ FixMyStreet::override_config {
     set_fixed_time('2021-01-09T17:00:00Z'); # After sample data collection
     $mech->log_in_ok($staff_user->email);
     $mech->get_ok('/waste/12345');
-    $mech->content_contains('Modify your garden waste subscription');
+    $mech->content_contains('Change your garden waste subscription');
     $mech->log_out_ok;
     $mech->get_ok('/waste/12345');
-    $mech->content_lacks('Modify your garden waste subscription');
+    $mech->content_lacks('Change your garden waste subscription');
 };
 
 FixMyStreet::override_config {
@@ -2778,10 +2729,10 @@ FixMyStreet::override_config {
 }, sub {
     $mech->log_in_ok($staff_user->email);
     $mech->get_ok('/waste/12345');
-    $mech->content_lacks('Modify your garden waste subscription');
+    $mech->content_lacks('Change your garden waste subscription');
     $mech->log_out_ok;
     $mech->get_ok('/waste/12345');
-    $mech->content_lacks('Modify your garden waste subscription');
+    $mech->content_lacks('Change your garden waste subscription');
 };
 
 sub get_report_from_redirect {

@@ -1,10 +1,14 @@
+use FixMyStreet;
+BEGIN { FixMyStreet->test_mode(1); }
+
 package FixMyStreet::Cobrand::Tester;
 
 use parent 'FixMyStreet::Cobrand::FixMyStreet';
 
 sub open311_config {
-    my ($self, $row, $h, $params) = @_;
+    my ($self, $row, $h, $params, $contact) = @_;
     $params->{multi_photos} = 1;
+    $params->{upload_files} = 1;
 }
 
 package main;
@@ -21,11 +25,12 @@ my $tilma = t::Mock::Tilma->new;
 LWP::Protocol::PSGI->register($tilma->to_psgi_app, host => 'tilma.mysociety.org');
 
 my $user = $mech->create_user_ok( 'eh@example.com' );
-my $body = $mech->create_body_ok( 2342, 'East Hertfordshire Council', {}, { cobrand => 'eastherts' });
+my $body = $mech->create_body_ok( 2342, 'East Hertfordshire Council', { cobrand => 'eastherts' });
 my $contact = $mech->create_contact_ok( body_id => $body->id, category => 'Potholes', email => 'POT' );
 $contact->set_extra_fields(
     { code => 'easting', datatype => 'number' },
     { code => 'northing', datatype => 'number' },
+    { code => 'multi', datatype => 'multivaluelist', values => [ { name => "A", key => "A" }, { name => "B", key => "B" }] },
     { code => 'fixmystreet_id', datatype => 'number' },
 );
 $contact->update;
@@ -101,9 +106,8 @@ subtest 'test report with multiple photos only sends one', sub {
     ], 'One photo in media_url';
 };
 
-$photo_report->whensent(undef);
+$photo_report->resend;
 $photo_report->cobrand('tester');
-$photo_report->send_method_used('');
 $photo_report->update();
 
 subtest 'test sending multiple photos', sub {
@@ -135,6 +139,28 @@ subtest 'test sending multiple photos', sub {
     ], 'Multiple photos in media_url';
 };
 
+$photo_report->resend;
+$photo_report->set_extra_fields({ name => 'multi', value => ['A', 'B'] });
+$photo_report->update( { non_public => 1 });
+
+subtest 'test sending photos as file uploads along with a multivalue attribute', sub {
+    $body->update( { send_method => 'Open311', endpoint => 'http://endpoint.example.com', jurisdiction => 'FMS', api_key => 'test' } );
+
+    FixMyStreet::override_config {
+        STAGING_FLAGS => { send_reports => 1 },
+        ALLOWED_COBRANDS => [ 'tester' ],
+        MAPIT_URL => 'http://mapit.uk/',
+        PHOTO_STORAGE_BACKEND => 'FileSystem',
+        PHOTO_STORAGE_OPTIONS => {
+            UPLOAD_DIR => $UPLOAD_DIR,
+        },
+    }, sub {
+        FixMyStreet::Script::Reports::send();
+    };
+    $photo_report->discard_changes;
+    ok $photo_report->whensent, 'Report marked as sent';
+};
+
 my ($bad_category_report) = $mech->create_problems_for_body( 1, $body->id, 'Test', {
     cobrand => 'fixmystreet',
     category => 'Flytipping',
@@ -155,7 +181,7 @@ subtest 'test handles bad category', sub {
     like $bad_category_report->send_fail_reason, qr/Category Flytipping does not exist for body/, 'failure message set';
 };
 
-my $hounslow = $mech->create_body_ok( 2483, 'Hounslow Borough Council', {}, { cobrand => 'hounslow' });
+my $hounslow = $mech->create_body_ok( 2483, 'Hounslow Borough Council', { cobrand => 'hounslow' });
 my $contact2 = $mech->create_contact_ok( body_id => $hounslow->id, category => 'Graffiti', email => 'GRAF' );
 $contact2->set_extra_fields(
     { code => 'easting', datatype => 'number' },

@@ -20,7 +20,6 @@ OpenLayers.Layer.VectorBase = OpenLayers.Class(OpenLayers.Layer.Vector, {
     initialize: function(name, options) {
         OpenLayers.Layer.Vector.prototype.initialize.apply(this, arguments);
         // Update layer based upon new data from category change
-        $(fixmystreet).on('assets:selected', this.checkSelected.bind(this));
         $(fixmystreet).on('assets:unselected', this.checkSelected.bind(this));
         $(fixmystreet).on('report_new:category_change', this.update_layer_visibility.bind(this));
         $(fixmystreet).on('inspect_form:asset_change', this.update_layer_visibility.bind(this));
@@ -79,7 +78,7 @@ OpenLayers.Layer.VectorBase = OpenLayers.Class(OpenLayers.Layer.Vector, {
             return;
         }
         var threshold = 50; // metres
-        if ( this.fixmystreet.snap_threshold || this.fixmystreet.snap_threshold === 0 ) {
+        if ( this.fixmystreet.snap_threshold || this.fixmystreet.snap_threshold === "0" ) {
           threshold = this.fixmystreet.snap_threshold;
         }
         var marker = fixmystreet.markers.features[0];
@@ -138,8 +137,14 @@ OpenLayers.Layer.VectorBase = OpenLayers.Class(OpenLayers.Layer.Vector, {
         }
     },
 
-    setAttributeFields: function(feature) {
+    setAttributeFields: function(feature, no_action) {
         if (!this.fixmystreet.attributes) {
+            return;
+        }
+        // If we have a select layer with multiple asset layers, it is possible
+        // on category change that we get called on one asset layer with a
+        // selected asset from another layer. We do not want to confuse this.
+        if (this !== feature.layer) {
             return;
         }
         // Set the extra fields to the value of the selected feature
@@ -157,6 +162,10 @@ OpenLayers.Layer.VectorBase = OpenLayers.Class(OpenLayers.Layer.Vector, {
             $inspect_fields.val(value);
             $mobile_display.append(field_name + ': ' + value + '<br>');
         });
+
+        if (!no_action && this.fixmystreet.actions && this.fixmystreet.actions.attribute_set) {
+            this.fixmystreet.actions.attribute_set.call(this, feature);
+        }
     },
 
     clearAttributeFields: function() {
@@ -172,23 +181,21 @@ OpenLayers.Layer.VectorBase = OpenLayers.Class(OpenLayers.Layer.Vector, {
         if (!this.getVisibility()) {
           return;
         }
-        if (this.fixmystreet.select_action) {
-            if (fixmystreet.assets.selectedFeature()) {
-                this.asset_found();
-            } else {
-                this.asset_not_found();
-            }
+        if (fixmystreet.assets.selectedFeature()) {
+            this.asset_found();
+        } else {
+            this.asset_not_found();
         }
     },
 
     asset_found: function() {
-        if (this.fixmystreet.actions) {
+        if (this.fixmystreet.actions && this.fixmystreet.actions.asset_found) {
             this.fixmystreet.actions.asset_found.call(this, fixmystreet.assets.selectedFeature());
         }
     },
 
     asset_not_found: function() {
-        if (this.fixmystreet.actions) {
+        if (this.fixmystreet.actions && this.fixmystreet.actions.asset_not_found) {
             this.fixmystreet.actions.asset_not_found.call(this);
         }
     },
@@ -239,6 +246,7 @@ OpenLayers.Layer.VectorBase = OpenLayers.Class(OpenLayers.Layer.Vector, {
 OpenLayers.Layer.VectorAsset = OpenLayers.Class(OpenLayers.Layer.VectorBase, {
     initialize: function(name, options) {
         OpenLayers.Layer.VectorBase.prototype.initialize.apply(this, arguments);
+        $(fixmystreet).on('assets:selected', this.checkSelected.bind(this));
         $(fixmystreet).on('report_new:category_change', this.changeCategory.bind(this));
     },
     CLASS_NAME: 'OpenLayers.Layer.VectorAsset'
@@ -246,10 +254,11 @@ OpenLayers.Layer.VectorAsset = OpenLayers.Class(OpenLayers.Layer.VectorBase, {
 
 // This is required so that the found/not found actions are fired on category
 // select and pin move rather than just on asset select/not select.
-OpenLayers.Layer.VectorAssetMove = OpenLayers.Class(OpenLayers.Layer.VectorAsset, {
+OpenLayers.Layer.VectorAssetMove = OpenLayers.Class(OpenLayers.Layer.VectorBase, {
     initialize: function(name, options) {
-        OpenLayers.Layer.VectorAsset.prototype.initialize.apply(this, arguments);
+        OpenLayers.Layer.VectorBase.prototype.initialize.apply(this, arguments);
         $(fixmystreet).on('maps:update_pin', this.checkSelected.bind(this));
+        $(fixmystreet).on('report_new:category_change', this.changeCategory.bind(this));
         $(fixmystreet).on('report_new:category_change', this.checkSelected.bind(this));
     },
 
@@ -262,6 +271,7 @@ OpenLayers.Layer.VectorNearest = OpenLayers.Class(OpenLayers.Layer.VectorBase, {
 
     initialize: function(name, options) {
         OpenLayers.Layer.VectorBase.prototype.initialize.apply(this, arguments);
+        $(fixmystreet).on('assets:selected', this.checkSelected.bind(this));
         $(fixmystreet).on('maps:update_pin', this.checkFeature.bind(this));
         $(fixmystreet).on('report_new:category_change', this.changeCategory.bind(this));
     },
@@ -273,7 +283,7 @@ OpenLayers.Layer.VectorNearest = OpenLayers.Class(OpenLayers.Layer.VectorBase, {
         this.getNearest(lonlat);
         this.updateUSRNField();
         if (this.fixmystreet.road) {
-            var valid_category = this.fixmystreet.all_categories || ((this.fixmystreet.asset_category || this.fixmystreet.asset_group) && this.relevant());
+            var valid_category = this.fixmystreet.always_visible || ((this.fixmystreet.asset_category || this.fixmystreet.asset_group) && this.relevant());
             if (!valid_category || !this.selected_feature) {
                 this.road_not_found();
             } else {
@@ -871,7 +881,7 @@ function construct_hover_feature_control(asset_layers, options) {
 // fixmystreet.pin_prefix isn't always available here, due
 // to file loading order, so get it from the DOM directly.
 var map_data = document.getElementById('js-map-data');
-var pin_prefix = fixmystreet.pin_prefix || (map_data ? map_data.getAttribute('data-pin_prefix') : '/i/');
+var pin_prefix = fixmystreet.pin_prefix || (map_data ? map_data.getAttribute('data-pin_prefix') : '/i/pins/');
 
 fixmystreet.assets = {
     layers: [],
@@ -904,13 +914,13 @@ fixmystreet.assets = {
     }),
 
     style_default_select: new OpenLayers.Style({
-        externalGraphic: pin_prefix + "pin-spot.png",
+        externalGraphic: pin_prefix + "spot.png",
         fillColor: "#55BB00",
         graphicWidth: 48,
         graphicHeight: 64,
         graphicXOffset: -24,
         graphicYOffset: -56,
-        backgroundGraphic: pin_prefix + "pin-shadow.png",
+        backgroundGraphic: pin_prefix + "shadow/pin.png",
         backgroundWidth: 60,
         backgroundHeight: 30,
         backgroundXOffset: -7,
@@ -1053,9 +1063,9 @@ asset_item_message - if present, used as the 'You can pick a...' message, with
 
 VectorAsset
 -----------
-select_action - boolean, if set then asset selection will call
-    actions.asset_found with the selected asset, and asset deselection will
-    call actions.asset_not_found
+actions.asset_found/actions.asset_not_found - if present, then asset selection
+will call the former with the asset, and asset deselection will call the
+latter.
 attributes - a hash of field to attribute. On asset selection, if attribute is
     a function, it is called with the feature; otherwise it is looked up in the
     feature's attributes. Then the input with the field name is set (and
@@ -1073,6 +1083,9 @@ sets the attribute fields.
 VectorAssetMove
 ---------------
 This also calls asset_found/asset_not_found on category change/pin move.
+You will need to use this class if you need the functions to fire as soon as
+the layer is displayed (e.g. if asset selection is mandatory, to show the
+select an asset message).
 
 VectorNearest
 -------------
@@ -1084,13 +1097,11 @@ usrn - if present, as either an object of attribute/field keys or an array of
     attribute with the attribute key (by default, or calls getUSRN with the
     nearest feature if present)
 road - boolean; if present:
-    If there is a nearest feature, and either all_categories is set or it is a
+    If there is a nearest feature, and either always_visible is set or it is a
     Relevant category/group, call actions.found with the nearest feature (if
     actions.found exists), otherwise call only_send with the body.
     If not, call actions.not_found (if present), otherwise call
     remove_only_send.
-all_categories - boolean to be set if the road found/not found functions should
-    fire on all categories
 
 Found / Not Found standard functions
 ====================================
@@ -1119,6 +1130,17 @@ construct_asset_name - if present, called with the above ID, to return ID and
 */
     add: function(default_options, options) {
         if (!document.getElementById('map')) {
+            return;
+        }
+
+        if (options && options.length) {
+            // A list of layers
+            var layers_added = [];
+            $.each(options, function(i, l) {
+                var opts = $.extend(true, {}, default_options, l);
+                layers_added.push(fixmystreet.assets.add_layer(opts));
+            });
+            fixmystreet.assets.add_controls(layers_added, default_options);
             return;
         }
 
@@ -1389,21 +1411,30 @@ For responsibility messages, any .js-update-coordinates link will have
 its parameters replaced with the current latitude/longitude; any
 .js-roads-asset can be replaced with the current layer asset_item/type.
 
-.asset_found / .asset_not_found - used with VectorAsset actions;
-  found will hide messages matching the layer's no_asset_msgs_class, or
-  the message matching the layer's no_asset_msg_id, or #js-not-an-asset
-  if neither are present. It will enable the report form (unless a
-  stopper message or a responsibility message is being shown).
-  not found will disable the report form, hide messages as above, and,
-  if no stopper message, then show the layer's no_asset_msg_id or
+In all the below, the message matched/used is as follows:
+* If no_asset_message is provided (either a string, or a hash with ID keys plus
+  "default" if you have multiple messages for the one layer), one is
+  automatically constructed and used.
+* Otherwise, you provide no_asset_msg_id of an ID of a div present in the HTML
+  to use (they are in report/new/roads_message.html), or it defaults to
   #js-not-an-asset.
+* If you have multiple messages for the one layer (see e.g.
+  fixmystreet.assets.buckinghamshire.street_found), you can specify a
+  no_asset_msgs_class to make sure they all get hidden correctly.
+
+.asset_found / .asset_not_found - used with VectorAsset actions;
+  found will hide matching messages, and enable the report form (unless a
+  stopper message or a responsibility message is being shown).
+  not found will disable the report form, hide matching messages, and,
+  if no stopper message, then show the relevant message ID.
 
 .road_found / .road_not_found - used with VectorNearest actions;
   road_found(layer, feature, [criterion], [msg_id]): If an asset is
   selected, hide messages/enable form as above. If no criterion function
   is supplied, or it returns true, do the same. Otherwise, mark this
   body as do not send, and if it's the only body (or Bucks special case)
-  disable the form and show the message given as msg_id.
+  disable the form and show the message given as msg_id (or if not present,
+  default as above).
   road_not_found(layer, [criterion]): If an asset is selected, hide
   messages/enable form as above. Otherwise, if it's the only body or the
   criterion passes, disable form/show message as above.
@@ -1419,11 +1450,27 @@ fixmystreet.message_controller = (function() {
         ignored_bodies = [];
 
     // This shows an error message because e.g. an asset isn't selected or a road hasn't been clicked
-    function show_responsibility_error(id, asset_item, asset_type) {
+    function show_responsibility_error(id, layer) {
+        var layer_data = layer.fixmystreet;
+
         $("#js-roads-responsibility .js-responsibility-message").addClass("hidden");
+
+        if (layer_data.no_asset_message) {
+            var cls = 'js-roads-layer-' + layer.id;
+            id = id || '#' + cls;
+            var nohash = id.replace('#', '');
+            if (!$(id).length) {
+                var div = $('<div class="hidden js-responsibility-message ' + cls + '"></div>');
+                var message = layer_data.no_asset_message[id] || layer_data.no_asset_message["default"] || layer_data.no_asset_message;
+                div.attr('id', nohash).html(message).appendTo('#js-roads-responsibility');
+            }
+        } else {
+            id = id || '#js-not-an-asset';
+        }
+
         var asset_strings = $(id).find('.js-roads-asset');
-        if (asset_item) {
-            asset_strings.html('a <b class="asset-' + asset_type + '">' + asset_item + '</b>');
+        if (layer_data.asset_item) {
+            asset_strings.html('a <b class="asset-' + layer_data.asset_type + '">' + layer_data.asset_item + '</b>');
         } else {
             asset_strings.html(asset_strings.data('original'));
         }
@@ -1445,24 +1492,37 @@ fixmystreet.message_controller = (function() {
         if ($('html').hasClass('mobile')) {
             var msg = $(id).html();
             var mobile_class = id.replace('#', '');
+            $("body").addClass("map-with-crosshairs2");
             $div = $('<div class="js-mobile-not-an-asset mob_' + mobile_class + '"></div>').html(msg);
             $div.appendTo('#map_box');
         } else {
             $("#js-roads-responsibility").removeClass("hidden");
-            $("#js-roads-responsibility")[0].scrollIntoView();
+            var top_sidebar = $('#map_sidebar').offset().top;
+            var top_message = $('#js-roads-responsibility').offset().top;
+            if (top_message < top_sidebar) {
+                $("#js-roads-responsibility")[0].scrollIntoView();
+            }
         }
         $(id).removeClass("hidden");
     }
 
     // This hides the asset/road not found message
-    function hide_responsibility_errors(id, layer_data) {
+    function hide_responsibility_errors(id, layer) {
+        var layer_data = layer.fixmystreet;
+
+        if (layer_data.no_asset_message) {
+            id = '.js-roads-layer-' + layer.id;
+        } else {
+            id = id || '#js-not-an-asset';
+        }
+
         // If the layer provides a class of messages, hide them all, otherwise hide the ID we're given
         if (layer_data.no_asset_msgs_class) {
             $(layer_data.no_asset_msgs_class).addClass("hidden");
         } else {
             $(id).addClass("hidden");
         }
-        var mobile_id = id.replace('#', '');
+        var mobile_id = id.replace(/[#.]/, '');
         var mobile_class = '.mob_' + mobile_id;
         $(mobile_class).remove();
         if (!$("#js-roads-responsibility .js-responsibility-message:not(.hidden)").length) {
@@ -1475,6 +1535,9 @@ fixmystreet.message_controller = (function() {
         if ( $('#js-roads-responsibility').is(':visible') || $('.js-mobile-not-an-asset').length ) {
             return;
         }
+        if (hide_continue_button()) {
+            $('.js-reporting-page--next').show();
+        }
         $('.js-reporting-page--next').prop('disabled', false);
         $("#mob_ok, #toggle-fullscreen").removeClass('hidden-js');
     }
@@ -1486,6 +1549,16 @@ fixmystreet.message_controller = (function() {
             $("#mob_ok, #toggle-fullscreen").addClass('hidden-js');
         } else {
             $('.js-reporting-page--next').prop('disabled', true);
+            if (hide_continue_button()) {
+                $('.js-reporting-page--next').hide();
+            }
+        }
+    }
+
+    function hide_continue_button() {
+        var cobrands_to_hide = ['hart', 'surrey'];
+        if (cobrands_to_hide.indexOf(fixmystreet.cobrand) !== -1) {
+            return 1;
         }
     }
 
@@ -1493,8 +1566,8 @@ fixmystreet.message_controller = (function() {
     // stopper message or dupes are shown) reenables the report form
     function responsibility_off(layer, type) {
         var layer_data = layer.fixmystreet;
-        var id = layer_data.no_asset_msg_id || '#js-not-an-asset';
-        hide_responsibility_errors(id, layer_data);
+        var id = layer_data.no_asset_msg_id;
+        hide_responsibility_errors(id, layer);
         if (!document.getElementById(stopperId)) {
             enable_report_form();
             if (type === 'road') {
@@ -1507,14 +1580,14 @@ fixmystreet.message_controller = (function() {
     // message is shown) shows a responsibility message
     function responsibility_on(layer, type, override_id) {
         var layer_data = layer.fixmystreet;
-        var id = override_id || layer_data.no_asset_msg_id || '#js-not-an-asset';
+        var id = override_id || layer_data.no_asset_msg_id;
         disable_report_form(type);
         if (type === 'road') {
             fixmystreet.pageController.addMapPage(layer);
         }
-        hide_responsibility_errors(id, layer_data);
+        hide_responsibility_errors(id, layer);
         if (!document.getElementById(stopperId)) {
-            show_responsibility_error(id, layer_data.asset_item, layer_data.asset_type);
+            show_responsibility_error(id, layer);
         }
     }
 

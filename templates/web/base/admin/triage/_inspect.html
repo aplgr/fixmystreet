@@ -10,14 +10,14 @@
                     [% IF group_select == 0 AND problem.category == group.name %]
                         [% selected = 1; group_select = 1 %]
                     [% END %]
-                    <option value="[% cat_op.id %]"[% ' selected' IF selected OR problem.category == cat_op.category %]>[% cat_op.category_display %] ([% cat_op.email %])</option>
+                    <option value="[% cat_op.id %]"[% ' selected' IF selected OR problem.contact.id == cat_op.id %]>[% cat_op.category_display %] ([% cat_op.email %])</option>
                     [% selected = 0 %]
                 [%~ END ~%]
                 [% IF group.name %]</optgroup>[% END %]
             [%~ END =%]
         [% ELSE %]
               [% FOREACH cat IN category_options %]
-                <option value="[% cat.id %]"[% ' selected' IF problem.category == cat.category %]>[% cat.category_display %]</option>
+                <option value="[% cat.id %]"[% ' selected' IF problem.contact.id == cat.id %]>[% cat.category_display %]</option>
               [% END %]
       [% END %]
   [% END %]
@@ -46,6 +46,9 @@
                 [%~ END ~%]
             </strong>
             [% problem.category %]
+            [% IF c.cobrand.moniker == 'buckinghamshire' AND problem.contact %]
+                ([% problem.contact.email %])
+            [% END %]
         </p>
 
         <p>
@@ -67,7 +70,7 @@
           [% FOR field IN extra_fields %]
           [% NEXT IF field.name == 'urgent' %]
           <p>
-              <label for="[% field.name %]">[% field.description %]</label>
+              <label for="[% field.name %]">[% field.description OR field.name %]</label>
               <input class="form-control" name="[% field.name %]" type="text" value="[% field.value %]" disabled>
           </p>
           [% END %]
@@ -78,7 +81,7 @@
 
         <p>
           <input type="hidden" name="token" value="[% csrf_token %]" />
-          <input class="btn btn-primary" type="submit" value="[% loc('Save changes') %]" data-value-original="[% loc('Save changes') %]" data-value-duplicate="[% loc('Save + close as duplicate') %]" name="save" />
+          <input class="btn btn--primary" type="submit" value="[% loc('Save changes') %]" data-value-original="[% loc('Save changes') %]" data-value-duplicate="[% loc('Save + close as duplicate') %]" name="save" />
         </p>
       </div>
 

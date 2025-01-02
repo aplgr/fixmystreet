@@ -1,10 +1,9 @@
-[% SET bodyclass = 'waste' %]
+[% USE date %]
+[% INCLUDE waste/header.html %]
 
-[% INCLUDE header.html %]
-
-  [% PROCESS 'govuk/fields.html' %]
-  [% PROCESS title title=form.title %]
-  [% PROCESS errors %]
+[% PROCESS 'govuk/fields.html' %]
+[% PROCESS title title=form.title %]
+[% PROCESS errors %]
 
 <p>
 You can subscribe to our garden waste collection service if you are a frequent gardener, or if you can’t home compost your own garden waste.
@@ -13,7 +12,14 @@ You can subscribe to our garden waste collection service if you are a frequent g
 <h2>Costs</h2>
 
 <p>
-A 12 month subscription is £[% tprintf('%.2f', per_bin_cost / 100 ) %] per bin.
+It costs
+£[% tprintf('%.2f', per_bin_cost / 100 ) %]
+for a 12-month subscription.
+[% IF next_month_cost %]
+From [% date.format(next_month_cost.start_date, '%e %B') %], subscribers will pay
+£[% tprintf('%.2f', next_month_cost.cost / 100 ) %]
+for a 12-month subscription.
+[% END %]
 </p>
 
 <p>
@@ -73,7 +79,7 @@ You can fill your sacks whenever you need to during your 12 month subscription a
 </p>
 [% END %]
 
-<form method="post">
+<form method="post" action="garden">
   [% PROCESS form %]
 </form>
 

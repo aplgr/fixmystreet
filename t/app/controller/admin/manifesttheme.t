@@ -1,6 +1,6 @@
 use Path::Tiny;
-use FixMyStreet::DB;
 use FixMyStreet::TestMech;
+use FixMyStreet::DB;
 
 my $mech = FixMyStreet::TestMech->new;
 
@@ -58,6 +58,8 @@ subtest "cobrand admin lets you create a new theme" => sub {
     my $fields = {
         name => "Lincolnshire FixMyStreet",
         short_name => "Lincs FMS",
+        wasteworks_name => "Lincolnshire WasteWorks",
+        wasteworks_short_name => "Lincs WW",
     };
     $mech->submit_form_ok( { with_fields => $fields } );
     is $mech->uri->path, '/admin/manifesttheme/lincolnshire', "redirected to edit page";
@@ -66,9 +68,11 @@ subtest "cobrand admin lets you create a new theme" => sub {
     my $theme = FixMyStreet::DB->resultset('ManifestTheme')->find({ cobrand => 'lincolnshire' });
     is $theme->name, "Lincolnshire FixMyStreet";
     is $theme->short_name, "Lincs FMS";
+    is $theme->wasteworks_name, "Lincolnshire WasteWorks";
+    is $theme->wasteworks_short_name, "Lincs WW";
     is $theme->background_colour, undef;
 
-    my $log = $superuser->admin_logs->search({}, { order_by => { -desc => 'id' } })->first;
+    my $log = $superuser->admin_logs->order_by('-id')->first;
     is $log->object_id, $theme->id;
     is $log->action, "add";
     is $log->object_summary, "lincolnshire";
@@ -81,14 +85,18 @@ subtest "cobrand admin lets you update an existing theme" => sub {
     my $fields = {
         background_colour => "#663399",
         theme_colour => "rgb(102, 51, 153)",
+        wasteworks_name => "Lincolnshire Waste",
+        wasteworks_short_name => "Lincs Waste",
     };
     $mech->submit_form_ok( { with_fields => $fields } );
 
     my $theme = FixMyStreet::DB->resultset('ManifestTheme')->find({ cobrand => 'lincolnshire' });
     is $theme->background_colour, "#663399";
     is $theme->theme_colour, "rgb(102, 51, 153)";
+    is $theme->wasteworks_name, "Lincolnshire Waste";
+    is $theme->wasteworks_short_name, "Lincs Waste";
 
-    my $log = $superuser->admin_logs->search({}, { order_by => { -desc => 'id' } })->first;
+    my $log = $superuser->admin_logs->order_by('-id')->first;
     is $log->object_id, $theme->id;
     is $log->action, "edit";
 };
@@ -214,7 +222,7 @@ subtest "can delete theme" => sub {
     is( FixMyStreet::DB->resultset('ManifestTheme')->count, 0, "theme deleted" );
     ok !$icon_dest->exists, "Icon removed from disk";
 
-    my $log = $superuser->admin_logs->search({}, { order_by => { -desc => 'id' } })->first;
+    my $log = $superuser->admin_logs->order_by('-id')->first;
     is $log->object_id, $theme_id;
     is $log->action, "delete";
 };

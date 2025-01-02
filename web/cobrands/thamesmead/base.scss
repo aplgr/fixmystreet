@@ -54,7 +54,7 @@ html.js-nav-open #nav-link {
     width: 144px;
     // height: 61px; // see below
     background-size: cover;
-    @include svg-background-image('/cobrands/thamesmead/images/peabody_logo');
+    background-image: url("/cobrands/thamesmead/images/peabody_logo.svg");
 
     // text-indent doesn’t play nicely with focus outline,
     // so use padding overflow trick instead
@@ -98,36 +98,28 @@ html.js-nav-open #nav-link {
 }
 
 #front-main {
-    text-align: left;
-
-    #postcodeForm {
-        background: transparent;
-
-        div {
-            border: none;
-            background: transparent;
-
-            input#pc {
-                @include peabody-form-input($margin: 0 0.5em 0 0, $padding: 5px 0.5em);
-                font-size: 1.25em;
-                background-color: $peabody-white;
-            }
-
-            input#sub {
-                @include peabody-button-primary();
-                font-size: 1.25em;
-            }
-        }
-    }
-
     h2 {
         font-style: inherit;
         font-family: $body-font;
     }
 }
 
-a#geolocate_link {
-    @include peabody-button-secondary();
+.postcode-form-box {
+    div {
+        border: none;
+        background: transparent;
+    }
+
+    input#pc {
+        @include peabody-form-input($margin: 0 0.5em 0 0, $padding: 5px 0.5em);
+        font-size: 1.25em;
+        background-color: $peabody-white;
+    }
+
+    input#sub {
+        @include peabody-button-primary();
+        font-size: 1.25em;
+    }
 }
 
 h1, .h1, h2, .h2 {
@@ -180,30 +172,13 @@ p.form-error {
     font-weight: 800;
 }
 
-.btn,
-.green-btn {
+.btn {
     @include peabody-button-primary();
 }
 
 #front_stats {
     color: $peabody-teal;
     background: transparent;
-}
-
-body.twothirdswidthpage .content .sticky-sidebar {
-    aside {
-        margin: 1em 0 2em 0;
-    }
-
-    ul {
-        display: flex;
-        flex-wrap: wrap;
-        margin: 0 -0.5em;
-    }
-
-    li {
-        margin: 0 0.5em;
-    }
 }
 
 // As per Peabody Website style guide

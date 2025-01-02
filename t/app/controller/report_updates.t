@@ -1,6 +1,9 @@
 use strict;
 use warnings;
 
+use FixMyStreet;
+BEGIN { FixMyStreet->test_mode(1); }
+
 package FixMyStreet::Cobrand::NoUpdates;
 
 use parent 'FixMyStreet::Cobrand::FixMyStreet';
@@ -13,6 +16,9 @@ use FixMyStreet::TestMech;
 use Web::Scraper;
 use Path::Class;
 use DateTime;
+
+FixMyStreet::App->log->disable('info');
+END { FixMyStreet::App->log->enable('info'); }
 
 my $mech = FixMyStreet::TestMech->new;
 
@@ -1237,6 +1243,7 @@ for my $test (
         field_errors => [
             'Please enter a valid email',
             "There was a problem with your login information. If you cannot remember your password, or do not have one, please fill in the \x{2018}No\x{2019} section of the form.",
+            "There was a problem with your login information. If you cannot remember your password, or do not have one, please select \x{2018}Fill in your details manually\x{2019}.",
             'Please enter your name', # FIXME Not really necessary error
         ],
     },
@@ -1251,6 +1258,7 @@ for my $test (
         },
         field_errors => [
             "There was a problem with your login information. If you cannot remember your password, or do not have one, please fill in the \x{2018}No\x{2019} section of the form.",
+            "There was a problem with your login information. If you cannot remember your password, or do not have one, please select \x{2018}Fill in your details manually\x{2019}.",
             'Please enter your name', # FIXME Not really necessary error
         ],
     },

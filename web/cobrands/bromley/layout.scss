@@ -13,23 +13,14 @@ body {
 
 // Alter the logo and the header on every page *but* the map page. On the map
 // page it stays small like in base.css
-body.fullwidthpage, body.twothirdswidthpage, body.authpage, body.waste {
+body:not(.mappage) {
   #site-logo {
     $logo-height-desktop: 88px;
     width: 157px;
     height: 0;
-
-    @include svg-background-image("/cobrands/bromley/images/site-logo");
     background-size: 157px $logo-height-desktop;
-    background-position: center;
-    background-repeat: no-repeat;
-  
     //Not displaying the text
     padding-top: calc(#{$logo-height-desktop} + 10px);
-    overflow: hidden;
-    white-space: nowrap;
-    text-indent: -999999px;
-    z-index:2;
   }
 }
 
@@ -64,20 +55,11 @@ body.fullwidthpage, body.twothirdswidthpage, body.authpage, body.waste {
     padding: 0.75em;
 
     margin: 0;
-    @include border-radius(0.25em);
+    border-radius: 0.25em;
     &:hover, &:focus {
       background: darken($bromley_blue, 10%);
       color: #fff;
       text-decoration: none;
-    }
-  }
-
-  span.report-a-problem-btn {
-    cursor:auto;
-    border-radius: 0.25em;
-    &:hover, &:focus {
-      color: $nav_colour !important;
-      background-color: $nav_hover_background_colour !important;
     }
   }
 
@@ -104,50 +86,27 @@ body.fullwidthpage, body.twothirdswidthpage, body.authpage, body.waste {
 }
 
 #front-main {
-  background: $bromley_green;
   padding-top: 5em;
   padding-bottom: 5em;
   position: relative;
 
-  h1.main {
-    color: #fff;
+  h1 {
     font-weight: 500;
     max-width: 350px;
     line-height: 130%;
-    text-align: left;
+    color: $primary_text;
   }
 
   #front-main-container {
     position: relative;
     z-index: 2;
-
-    form#postcodeForm {
-      margin: 0 0;
-      text-align: left;
-      color: $bromley_black;
-      background: white;
-      border-radius: 8px;
-      border: 2px solid $bromley_green;
-      max-width: 550px;
-      padding: 1.5em 2em;
-
-      label {
-        margin-bottom: 1em;
-      }
-
-      .form-hint {
-        color: transparentize($color: $bromley_black, $amount: 0.3);
-      }
-      
-      div {
-        margin-left: 0;
-      }
-    }
   }
 
-  .bromley-bubble {
+  &::after {
+    content: '';
+    display: block;
     position: absolute;
-    @include svg-background-image("/cobrands/bromley/images/curve-top");
+    background-image: url("/cobrands/bromley/images/curve-top.svg");
     background-position: bottom 0 right 0;
     background-size: contain;
     background-repeat: no-repeat;
@@ -159,9 +118,21 @@ body.fullwidthpage, body.twothirdswidthpage, body.authpage, body.waste {
   }
 }
 
+.postcode-form-box {
+  margin: 0 0;
+  text-align: left;
+  border-radius: 8px;
+  border: 2px solid $bromley_green;
+  max-width: 550px;
+  padding: 1.5em 2em;
+  .alertpage & {
+    border: none;
+    padding: 0;
+  }
+}
+
 .container .content {
   .frontpage & {
-    background: $bromley_green_l2;
     border: 2px solid #b3d3b3;
     // border: 2px solid $bromley_green;
     border-radius: 8px;
@@ -193,17 +164,9 @@ body.alertindex form.full-width {
   margin-left: 0;
 }
 
-.emergency-message {
+.site-message {
     padding: 1em;
     font-size: 1em;
-}
-
-// We have slightly different content in our lists of issues to what
-// reports_list.scss expects, so we need to tweak the padding back to normal.
-// This stops the spacing being too large.
-.item-list__item--with-pin a {
-  padding: 0;
-  padding-left: 3em;
 }
 
 // Bromley's footer

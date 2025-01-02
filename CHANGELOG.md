@@ -1,85 +1,163 @@
 ## Releases
 
+* Unreleased
+    - Admin improvements:
+        - Improve performance of admin reports search for email. #5284
+    - Development improvements
+        - More logging when page_error is called, to aid troubleshooting. #5279
+
+* v6.0 (14th November 2024)
+    - Front end improvements:
+        - Include requirements for redeeming the link in the email change confirmation mail. #4422
+        - Use email field type for username if SMS authentication not enabled. #4455
+        - Text overrides for new report fields can be configured to apply when it is known the report will go to a particular cobrand. #4466, #4516
+        - Improve handling cache expiry for front page statistics. #4584
+        - Add geolocation button to centre map at user's location. #4671
+        - WasteWorks PWA can now have a separate name from the FixMyStreet PWA. #4727
+        - Users can now opt out of questionnaires. #4758
+        - Include reference in report list emails. #4760
+        - Add support for different '/around' map display times for open/closed/fixed reports #4790
+        - Add code to enable category filtering box. #4914
+        - Improved the display of the map filters. #4728
+        - Don't display 'Show my name publicly' checkbox when making a private report to prevent confusion. #5029
+        - Allow decimals in the local alert radius. #5205
+    - Bugfixes:
+        - Stop map panning breaking after long press. #4423
+        - Fix RSS feed subscription from alert page button. #4448
+        - Fix link to edit category with apostrophe in category name. #4497
+        - Fallback extra field in submit email should be `name`, not `code`. #4545
+        - Allow confirmation links to login user 30s within first use to prevent things like Outlook 'safelinks' breaking the UX. #4556
+        - Fixes default status report filter text on Your Account page. #4558
+        - Don't zoom to bounds when searching for a postcode. #4717
+        - Fix restoring a draft with no location. #4762
+        - Create reporter alert before creating first unconfirmed auto-update.
+        - Fix display of user in assignment dropdown. #4855
+        - Fix setting of fixed timestamp in CSV export. #5119
+        - Fix CSV export of reports with only hidden/unconfirmed updates. #5119
+        - Fix displaying category page if over 1,000 history entries. #5140
+        - Stop wrapping category notices in a label.
+        - Allow through a "0" extra question value. #5245
+    - Admin improvements:
+        - Rename emergency message to site message. #4450
+        - Added a category control for overriding the text of the new report details field. #4514
+        - Added support for 'multivaluelist' extra category questions using checkboxes. #4514
+        - Added support for 'datetime' extra category questions using a datetime picker. #4514
+        - Added option to make a phone number required for a category. #4520
+        - Add way to pick multiple categories in the dashboard. #4700
+        - Staff cannot update name reporting when logged out. #5031
+        - Allow h1, h2, h3 tags in contact notices/questions. #4959
+        - Tweak config page display. #5139
+        - Minor display improvements to report/update pages. #5141
+        - Minor display and performance improvements to user pages. #5138
+        - Move add new body/category to their own admin pages. #5140
+        - Move navigation to sidebar. #5093
+    - Development improvements:
+        - Extra data columns now stored as JSON, not RABX. #3216
+        - Auto-spot a default favicon.ico. #4461
+        - Add `send_state` column to reports. #4048
+        - Return random unprocessed row to daemon. #4545
+        - A cobrand level text override for the details field label on new reports can now be configured. #4514
+        - Cobrands can provide (per-category) custom distances for duplicate lookup. #4456 #4746 #5162
+        - Add perl 5.38 support. #4831
+        - Add plain text template previews to /_dev/email. #5105
+        - Add --exclude option to bin/open311-populate-service-list #5177
+        - Add /status/health page to indicate service health. #5186
+    - Performance improvements:
+        - Reduce database queries on shortlist page. #4548
+        - Provide ResultSet fallback translation in lookup. #4548
+        - Mark non-Open311 updates as processed by daemon. #4552
+        - Inspector/planned offline report caching now fetches URLs sequentially, not in parallel. #5204
+        - Desktop browsers won't automatically cache reports offline when visiting /my/planned. #5206
+    - Changes:
+        - Switch to OpenStreetMap for reverse geocoding. #4444
+        - Convert all uploaded images to JPEGs. #4778
+        - Redirect after POST when creating reports. #4362
+        - Include status change line in report update emails using auto response templates. #4967
+        - Don't display a translation banner in front of important UI elements on Android. #4153
+
 * v5.0 (10th May 2023)
     - Front end improvements:
-        - Use crosshairs for mobile reporting.
+        - Use crosshairs for mobile reporting. #4176
         - Enable keyboard navigation of map. #3321
-        - Highlight pin on sidebar focus as well as hover.
+        - Highlight pin on sidebar focus as well as hover. #3709
         - Map page pagination links now styled as links rather than buttons. #3727
-        - Include username in inactive email.
-        - Update document title on client-side new report page transition.
-        - Disable staff phone and name fields to avoid accidental overwriting.
-        - Hide 'Assigned to' text if a report is not assigned to anyone
-        - Hide 'Assign to' dropdown if no available assignees
-        - Allow 'Asset ID' (part of optional extra data displayed for a report) to be customisable for all cobrands
-        - Add initial update template on report sending, not creation.
-        - Add option to set an emergency message on reporting pages.
+        - Include username in inactive email. #3734
+        - Update document title on client-side new report page transition. #3834
+        - Disable staff phone and name fields to avoid accidental overwriting. #3805
+        - Hide 'Assigned to' text if a report is not assigned to anyone #3646
+        - Hide 'Assign to' dropdown if no available assignees #3646
+        - Allow 'Asset ID' (part of optional extra data displayed for a report) to be customisable for all cobrands #3920
+        - Add initial update template on report sending, not creation. #3949 #439
+        - Add option to set an emergency message on reporting pages. #4015
         - Add label to questionnaire textarea. #3944
         - Offline report drafting. #4290
         - Set width=device-width in viewport meta tag. #4384
         - Improve performance of front page ‘recent problems’ query. #4424
+        - Fix photo field label not visually appearing as a label.
     - Bugfixes:
         - Add ID attributes to change password form inputs.
         - Fix link deactivation for privacy policy link on privacy policy page. #3704
-        - Fix dashboard rows for categories with &s.
-        - Make calls from Geocoder files to https rather than http
+        - Fix dashboard rows for categories with &s. #3802
+        - Make calls from Geocoder files to https rather than http #3811
         - Inspector dropdown list only shows name once even if permissions repeated #3870
         - Inspector dropdown list doesn't show anonymised users, removing blank options #3873
         - Fix report unassignment so it works for users who did not create the report #3903
-        - [Open311] External code removal is not a change.
-        - Trim whitespace on extra status codes for response templates
+        - [Open311] External code removal is not a change. #3988
+        - Trim whitespace on extra status codes for response templates #3997
         - The permission default_to_body now also affects updates. #3317
         - Decouple the permission to manage shortlist from default_to_body. #3317
-        - Fix issue with sanitizing missing attributes.
+        - Fix issue with sanitizing missing attributes. #4086
         - Include email_text from templates in export-import-data script. #4084
-        - Stop map moving when navigating through images with arrow keys.
-        - Remember category group through OpenID login.
-        - For CSV export, fetch children of all generations.
-        - Reset subcategory selection on clicking browser 'back' button during new report journey
-        - Fix JS error going back from page to report page to map page
-        - Fix existing groups being removed when a contact is edited with the category_groups flag unset.
+        - Stop map moving when navigating through images with arrow keys. #3856
+        - Remember category group through OpenID login. #4231
+        - For CSV export, fetch children of all generations. #4059
+        - Reset subcategory selection on clicking browser 'back' button during new report journey #4260 #4284
+        - Fix JS error going back from page to report page to map page #4175
+        - Fix existing groups being removed when a contact is edited with the category_groups flag unset. #4307
+        - Stop map panning breaking after press on pin #4132
+        - With extended statuses, send 'closed' rather than 'open' status in Open311 service request when report is closed.
     - Accessibility improvements:
         - The "skip map" link on /around now has new wording. #3794
         - Improve visual contrast of pagination links. #3794
         - Make map pan/zoom controls keyboard-accessible. #3751
-        - Add missing label to alert distance input.
-        - Give generated map tiles blank alt attribute.
-        - Add fieldset to alert list and improve sort order.
-        - Remove unnecessary and add some missing fieldsets.
-        - Improve fancybox accessibility (text and focus).
-        - Add visually-hidden nearest address in report list.
-        - Add a focus state for button-variant mixin.
-        - Improved focus state for link images in the local alert page.
+        - Add missing label to alert distance input. #4248
+        - Give generated map tiles blank alt attribute. #4248
+        - Add fieldset to alert list and improve sort order. #4248
+        - Remove unnecessary and add some missing fieldsets. #4283
+        - Improve fancybox accessibility (text and focus). #4248
+        - Add visually-hidden nearest address in report list. #4283
+        - Add a focus state for button-variant mixin. #4312
+        - Improved focus state for link images in the local alert page. #4312
     - Admin improvements:
-        - Admin 'add user' form now always creates staff users
-        - Make sure staff permissions removed when anonymized.
-        - Add role filter to dashboard interface.
+        - Admin 'add user' form now always creates staff users #3749
+        - Make sure staff permissions removed when anonymized. #4051
+        - Add role filter to dashboard interface. #4082
         - Alerts are paginated on user edit page. #4158
-        - Restrict flagging users and reports to superusers.
-        - Display photos in report moderation updates, rather than just the image hashes.
+        - Restrict flagging users and reports to superusers. #4168
+        - Display photos in report moderation updates, rather than just the image hashes. #4266
         - Add 'admin_contact_validate_category' cobrand hook to validate category names when editing or creating contacts.
         - Restrict timeline to users with the report_edit permission.
     - Development improvements:
-        - Default make_css to `web/cobrands` rather than `web`.
-        - Ability to pass custom arguments (eg: SSL config) to server when running via Docker
-        - Allow bin/fetch start/end times to be fractional.
-        - Add an --exclude option to bin/fetch.
-        - Add an index on problem(external_id) to speed up bin/fetch --updates
-        - Upgrade Net::DNS and libwww to deal with IPv6 issues.
+        - Default make_css to `web/cobrands` rather than `web`. #3712
+        - Ability to pass custom arguments (eg: SSL config) to server when running via Docker #3713
+        - Allow bin/fetch start/end times to be fractional. #3738
+        - Add an --exclude option to bin/fetch. #3804
+        - Add an index on problem(external_id) to speed up bin/fetch --updates #3808
+        - Upgrade Net::DNS and libwww to deal with IPv6 issues. #3809
         - Add send_state column to updates. #3865
         - Enable alternative response from templates to be emailed to issue reporter. #4001
-        - Option to read asset layers from configuration.
-        - Add GitHub Action to generate POD documentation.
+        - Option to read asset layers from configuration. #4119
+        - Add GitHub Action to generate POD documentation. #4252
         - Use digest rather than last modified time for static versioning. #4280
         - Add 'open311_title_fetched_report' cobrand hook for customising how titles are created for fetch reports.
-        - Add way to use digest in static filename rather than query parameter.
+        - Add way to use digest in static filename rather than query parameter. #4402
     - Security
-        - Permit control over database connection `sslmode` via $FMS_DB_SSLMODE
+        - Permit control over database connection `sslmode` via $FMS_DB_SSLMODE #3927
     - Open311 improvements:
-        - Increase default timeout.
-        - Check for an identical latest update when adding a new one.
+        - Increase default timeout. #3738
+        - Check for an identical latest update when adding a new one. #4007
     - UK:
-        - Add CAPTCHA to contact form for non-UK IP addresses
+        - Add CAPTCHA to contact form for non-UK IP addresses #2303
 
 * v4.0 (3rd December 2021)
     - Front end improvements:

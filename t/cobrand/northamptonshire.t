@@ -1,7 +1,7 @@
 use Test::MockModule;
-
-use Catalyst::Test 'FixMyStreet::App';
+use File::Temp 'tempdir';
 use FixMyStreet::TestMech;
+use Catalyst::Test 'FixMyStreet::App';
 use FixMyStreet::Script::Reports;
 use Open311::PostServiceRequestUpdates;
 
@@ -12,7 +12,13 @@ my $mech = FixMyStreet::TestMech->new;
 use open ':std', ':encoding(UTF-8)';
 
 my $nh = $mech->create_body_ok(164186, 'Northamptonshire Highways', {
-    send_method => 'Open311', api_key => 'key', 'endpoint' => 'e', 'jurisdiction' => 'j', send_comments => 1, can_be_devolved => 1 }, { cobrand => 'northamptonshire' });
+    send_method => 'Open311', api_key => 'key', 'endpoint' => 'e', 'jurisdiction' => 'j', send_comments => 1, can_be_devolved => 1, cobrand => 'northamptonshire' });
+# Associate body with North Northamptonshire area
+FixMyStreet::DB->resultset('BodyArea')->find_or_create({
+    area_id => 164185,
+    body_id => $nh->id,
+});
+
 my $wnc = $mech->create_body_ok(164186, 'West Northamptonshire Council');
 my $po = $mech->create_body_ok(164186, 'Northamptonshire Police');
 
@@ -343,7 +349,7 @@ FixMyStreet::override_config {
         my $body = $mech->get_text_body_from_email($email);
         like $body, qr/Dear West Northamptonshire Council,/;
         like $body, qr/http:\/\/www\.example\.org/, 'correct link';
-        like $body, qr/Never retype another FixMyStreet report/, 'Has FMS promo text';
+        like $body, qr/FixMyStreet is an independent service/, 'Has FMS promo text';
     };
 
     subtest 'Check report emails to police use correct branding' => sub {
@@ -358,7 +364,7 @@ FixMyStreet::override_config {
         my $body = $mech->get_text_body_from_email($email);
         like $body, qr/Dear Northamptonshire Police,/;
         like $body, qr/http:\/\/www\.example\.org/, 'correct link';
-        like $body, qr/Never retype another FixMyStreet report/, 'Has FMS promo text';
+        like $body, qr/FixMyStreet is an independent service/, 'Has FMS promo text';
     };
 
     subtest 'Check report emails to highways use correct branding' => sub {
@@ -380,12 +386,14 @@ FixMyStreet::override_config {
 };
 
 subtest 'Dashboard CSV extra columns' => sub {
+    my $UPLOAD_DIR = tempdir( CLEANUP => 1 );
     my $staffuser = $mech->create_user_ok('counciluser@example.com', name => 'Council User',
         from_body => $nh, password => 'password');
     $mech->log_in_ok( $staffuser->email );
     FixMyStreet::override_config {
         MAPIT_URL => 'http://mapit.uk/',
         ALLOWED_COBRANDS => 'northamptonshire',
+        PHOTO_STORAGE_OPTIONS => { UPLOAD_DIR => $UPLOAD_DIR },
     }, sub {
         $mech->get_ok('/dashboard?export=1');
     };
@@ -403,13 +411,6 @@ subtest 'Old report cutoff' => sub {
     is $cobrand->should_skip_sending_update($update2), 0;
 };
 
-# Associate body with North Northamptonshire area
-# (It's associated with West when it's created at the top of this file)
-FixMyStreet::DB->resultset('BodyArea')->find_or_create({
-    area_id => 164185,
-    body_id => $nh->id,
-});
-
 subtest 'Dashboard wards contains North and West wards' => sub {
     my $staffuser = $mech->create_user_ok('counciluser@example.com', name => 'Council User',
         from_body => $nh, password => 'password');
@@ -422,6 +423,23 @@ subtest 'Dashboard wards contains North and West wards' => sub {
     };
     $mech->content_contains('Weston By Welland');
     $mech->content_contains('Sulgrave');
+};
+
+FixMyStreet::override_config {
+    MAPIT_URL => 'http://mapit.uk/',
+    ALLOWED_COBRANDS => 'fixmystreet',
+}, sub {
+    subtest 'All reports page working' => sub {
+        $mech->get_ok("/reports/Northamptonshire+Highways");
+        $mech->content_contains('Sulgrave');
+        $mech->content_contains('Weston');
+        $mech->get_ok("/reports/Northamptonshire+Highways/Weston+By+Welland");
+        $mech->content_lacks('Sulgrave');
+        $mech->content_contains('Weston');
+        $mech->get_ok("/reports/Northamptonshire+Highways/Sulgrave");
+        $mech->content_contains('Sulgrave');
+        $mech->content_lacks('Weston');
+    };
 };
 
 done_testing();

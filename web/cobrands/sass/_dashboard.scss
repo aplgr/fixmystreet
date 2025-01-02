@@ -21,7 +21,7 @@
 }
 
 .dashboard-item {
-    @include box-sizing(border-box);
+    box-sizing: border-box;
     padding: 1em;
 
     @media (min-width: 48em) {
@@ -82,10 +82,10 @@
 }
 
 .labelled-line-chart {
-    @include box-sizing(border-box);
+    box-sizing: border-box;
 
     @media (min-width: 48em) {
-        padding-right: 20%; // Same way round, regardless of text direction
+        padding-right: 15%; // Same way round, regardless of text direction
     }
 
     .label {
@@ -99,7 +99,7 @@
         margin-top: -1em;
         margin-#{$right}: 0;
         right: 0;
-        width: 18%; // 20% padding from .labelled-line-chart, 2% gutter
+        width: 14%; // 15% padding from .labelled-line-chart, 1% gutter
     }
 }
 
@@ -115,7 +115,7 @@
     margin: 0 -1em;
 
     & > * {
-        @include box-sizing(border-box);
+        box-sizing: border-box;
         padding: 0 1em 1em 1em;
     }
 
@@ -157,7 +157,7 @@
 }
 
 .dashboard-search__input {
-    @include box-sizing(border-box);
+    box-sizing: border-box;
     width: 80%;
     float: $left;
     padding-#{$right}: 1em;
@@ -186,7 +186,7 @@
         height: 16px;
         background-repeat: no-repeat;
         background-size: 112px 16px;
-        @include svg-background-image('/cobrands/fixmystreet/images/button-icons');
+        background-image: url("/cobrands/fixmystreet/images/button-icons.svg");
         background-position: -96px 0;
         margin-#{$right}: 0.5em;
         vertical-align: -0.1em;
@@ -226,7 +226,8 @@
 
     // Force field elements onto a single line.
     @media (min-width: 48em) {
-        @include flex-container();
+        display: flex;
+        flex-wrap: wrap;
     }
 
     // No border-top when visually preceded by .dashboard-header
@@ -245,12 +246,13 @@
 
         @media (min-width: 48em) {
             float: $left;
-            max-width: 25%;
         }
     }
 
     .no-label {
         margin-top: 1.25em + 1.5em + 0.5em; // label line-height + margin-top + margin-bottom
+        text-align: right;
+        flex-grow: 1;
     }
 
     select {
@@ -284,8 +286,23 @@
         box-shadow: none;
     }
 
+    .form-control {
+        height: 2.2em;
+    }
+
     .btn {
         padding: 0.5em 0.75em;
+    }
+}
+
+.dashboard-filters {
+    .multi-select-button {
+        max-width: 10em;
+    }
+
+    .form-control {
+        // To make them have the same height as the .multi-select-button
+        height: 3.3em;
     }
 }
 

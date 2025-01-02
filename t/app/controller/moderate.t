@@ -1,3 +1,6 @@
+use FixMyStreet;
+BEGIN { FixMyStreet->test_mode(1); }
+
 package FixMyStreet::Cobrand::Tester;
 
 use parent 'FixMyStreet::Cobrand::Default';
@@ -138,7 +141,7 @@ subtest 'Problem moderation' => sub {
         is $report->title, 'Good bad good';
         is $report->detail, 'Good bad bad bad good bad';
 
-        my @history = $report->moderation_original_datas->search(undef, { order_by => 'id' })->all;
+        my @history = $report->moderation_original_datas->order_by('id')->all;
         is @history, 2, 'Right number of entries';
         is $history[0]->title, 'Good bad good', 'Correct original title';
         is $history[1]->title, 'Good good', 'Correct second title';
@@ -320,6 +323,9 @@ subtest 'Problem moderation' => sub {
         is $mod->get_extra_metadata('moon'), 'waxing full';
         is $mod->get_extra_metadata('weather'), undef;
 
+        my $comp = $mod->compare_extra($report);
+        isa_ok($comp, 'FixMyStreet::Template::SafeString');
+        is $comp, "moon = wa<del style='background-color:#fcc'>x</del><ins style='background-color:#cfc'>n</ins>ing full<br><ins style='background-color:#cfc'>weather = snow</ins>";
         my $diff = $mod->extra_diff($report, 'moon');
         is $diff, "wa<del style='background-color:#fcc'>x</del><ins style='background-color:#cfc'>n</ins>ing full", 'Correct diff';
     };

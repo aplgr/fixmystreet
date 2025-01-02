@@ -14,7 +14,7 @@ use Memcached;
 use XML::Simple;
 use Utils;
 
-my $osmapibase    = "https://www.openstreetmap.org/api/";
+my $osmapibase    = "https://api.openstreetmap.org/api/";
 my $nominatimbase = "https://nominatim.openstreetmap.org/";
 
 # string STRING CONTEXT
@@ -26,6 +26,8 @@ sub string {
     my ( $cls, $s, $c ) = @_;
 
     my $params = $c->cobrand->disambiguate_location($s);
+    return $params->{result} if $params->{result};
+
     # Allow cobrand to fixup the user input
     $s = $params->{string} if $params->{string};
 
@@ -76,23 +78,12 @@ sub string {
 }
 
 sub reverse_geocode {
-    my ($latitude, $longitude, $zoom) = @_;
-    my $url =
-    "${nominatimbase}reverse?format=xml&zoom=$zoom&lat=$latitude&lon=$longitude";
-    my $key = "OSM:reverse_geocode:$url";
-    my $result = Memcached::get($key);
-    unless ($result) {
-        my $j = LWP::Simple::get($url);
-        if ($j) {
-            Memcached::set($key, $j, 3600);
-            my $ref = XMLin($j);
-            return $ref;
-        } else {
-            print STDERR "No reply from $url\n";
-        }
-        return undef;
-    }
-    return XMLin($result);
+    my ($cls, $cobrand, $latitude, $longitude, $zoom) = @_;
+    $zoom ||= 18; # zoom level 18 for building results
+    return if FixMyStreet->test_mode;
+    my $url = "${nominatimbase}reverse?format=jsonv2&zoom=$zoom&lat=$latitude&lon=$longitude";
+    my $j = FixMyStreet::Geocode::cache('osm', $url);
+    return $j ? $j : undef;
 }
 
 sub _osmxml_to_hash {
@@ -128,8 +119,8 @@ sub get_object_tags {
 # A better alternative might be
 # http://www.geonames.org/maps/osm-reverse-geocoder.html#findNearbyStreetsOSM
 sub get_nearest_road_tags {
-    my ( $cobrand, $latitude, $longitude ) = @_;
-    my $inforef = reverse_geocode($latitude, $longitude, 16);
+    my ( $cls, $cobrand, $latitude, $longitude ) = @_;
+    my $inforef = $cls->reverse_geocode($cobrand, $latitude, $longitude, 16);
     if (exists $inforef->{result}->{osm_type}
         && 'way' eq $inforef->{result}->{osm_type}) {
         my $osmtags = get_object_tags('way',
@@ -143,9 +134,9 @@ sub get_nearest_road_tags {
 }
 
 sub closest_road_text {
-    my ( $cobrand, $latitude, $longitude ) = @_;
+    my ( $cls, $cobrand, $latitude, $longitude ) = @_;
     my $str = '';
-    my $osmtags = get_nearest_road_tags( $cobrand, $latitude, $longitude );
+    my $osmtags = $cls->get_nearest_road_tags( $cobrand, $latitude, $longitude );
     if ($osmtags) {
         my ($name, $ref) = ('','');
         $name =  $osmtags->{name} if exists $osmtags->{name};

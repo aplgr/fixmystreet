@@ -1,4 +1,4 @@
-[% INCLUDE 'header.html', title => loc('Frequently Asked Questions'), bodyclass => 'twothirdswidthpage' %]
+[% INCLUDE 'header.html', title = loc('Frequently Asked Questions'), sidebar='about/_sidebar.html' %]
 
 <h1><a name="faq"></a>Frequently Asked Questions</h1>
 <dl>
@@ -16,7 +16,9 @@
         </p>
         <p>
             If you are reporting an emergency please do not report it online, but ring our
-            Customer Service Centre on <strong><a href="tel:03001261000">0300&nbsp;126&nbsp;1000</a></strong>.
+            Customer Service Centre on
+            <strong><a href="tel:03001267000">0300&nbsp;126&nbsp;7000</a></strong> for West Northamptonshire Council and
+            <strong><a href="tel:03001263000">0300&nbsp;126&nbsp;3000</a></strong> for North Northamptonshire Council.
         </p>
     </dd>
 
@@ -149,6 +151,15 @@
             size of your screen.
         </p>
     </dd>
+
+    <dt>Is there an app I can download?</dt>
+    <dd>
+    <p>
+        Yes, see our <a href="/about/web-app">instructions on how to download
+            the [% c.cobrand.council_name %] reporting app</a>.
+    </p>
+    </dd>
+
 </dl>
 
 <a name="practical"></a>
@@ -192,4 +203,4 @@
 </p>
 <p>&nbsp;<p>
 
-[% INCLUDE 'footer.html' pagefooter = 'yes' %]
+[% INCLUDE 'footer.html' %]

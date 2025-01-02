@@ -1,5 +1,7 @@
-[% emergency_message = c.cobrand.emergency_message('reporting') %]
-[% IF emergency_message %]
-    [% emergency_message | safe %]
+[% site_message = c.cobrand.site_message('reporting') %]
+[% IF site_message %]
+<div class="site-message__reporting">
+    [% site_message | safe | html_para %]
+</div>
 [% END %]
 

@@ -1,8 +1,10 @@
       <div class="inspect-section">
-        <p style="float: right">
-          <label for="non_public">[% loc('Private') %]</label>
-          <input type="checkbox" id="non_public" name="non_public" value="1"[% ' checked' IF problem.non_public %]>
-        </p>
+        [% IF c.cobrand.moniker != 'nottinghamshirepolice' %]
+          <p style="float: right">
+            <label for="non_public">[% loc('Private') %]</label>
+            <input type="checkbox" id="non_public" name="non_public" value="1"[% ' checked' IF problem.non_public %]>
+          </p>
+        [% END %]
         <p>
           <strong>[% loc('Report ID:') %]</strong>
           <span class="js-report-id">[% problem.id %]</span>
@@ -28,6 +30,9 @@
           [% IF non_anon_email %]
             <strong>[% loc('Email:') %]</strong>
             <a href="mailto:[% problem.user.email %]">[% problem.user.email %]</a>
+            <p>
+              <strong>[% loc('Name:') %]</strong> [% problem.name %]
+            </p>
           [% END %]
           </p>
         [% END %]
@@ -45,10 +50,10 @@
           <input type="hidden" name="longitude" value="[% problem.longitude %]">
           <input type="hidden" name="latitude" value="[% problem.latitude %]">
         </p>
-        [% IF problem.nearest_address() %]
+        [% IF problem.nearest_address %]
         <p>
             <strong>[% loc('Nearest calculated address:') %]</strong>
-            [% problem.nearest_address() %]
+            [% problem.nearest_address %]
         </p>
         [% END %]
         <p>

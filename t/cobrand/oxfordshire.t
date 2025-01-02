@@ -1,8 +1,10 @@
 use Test::MockModule;
 
 use CGI::Simple;
+use File::Temp 'tempdir';
 use FixMyStreet::TestMech;
 use FixMyStreet::Script::Alerts;
+use FixMyStreet::Script::CSVExport;
 use FixMyStreet::Script::Reports;
 use Open311;
 my $mech = FixMyStreet::TestMech->new;
@@ -11,7 +13,7 @@ my $mech = FixMyStreet::TestMech->new;
 FixMyStreet::App->log->disable('info');
 END { FixMyStreet::App->log->enable('info'); }
 
-my $oxon = $mech->create_body_ok(2237, 'Oxfordshire County Council', {}, { cobrand => 'oxfordshire' });
+my $oxon = $mech->create_body_ok(2237, 'Oxfordshire County Council', { cobrand => 'oxfordshire' });
 my $counciluser = $mech->create_user_ok('counciluser@example.com', name => 'Council User', from_body => $oxon);
 my $role = FixMyStreet::DB->resultset("Role")->create({ body => $oxon, name => 'Role', permissions => [] });
 $counciluser->add_to_roles($role);
@@ -253,10 +255,12 @@ FixMyStreet::override_config {
     ok $mech->host('oxfordshire.fixmystreet.com');
 };
 
+my $UPLOAD_DIR = tempdir( CLEANUP => 1 );
 FixMyStreet::override_config {
     STAGING_FLAGS => { send_reports => 1, skip_checks => 1 },
     ALLOWED_COBRANDS => 'oxfordshire',
     MAPIT_URL => 'http://mapit.uk/',
+    PHOTO_STORAGE_OPTIONS => { UPLOAD_DIR => $UPLOAD_DIR },
 }, sub {
 
     subtest 'can use customer reference to search for reports' => sub {
@@ -271,6 +275,7 @@ FixMyStreet::override_config {
     subtest 'extra CSV columns are present' => sub {
 
         $problems[1]->update_extra_field({ name => 'usrn', value => '20202020' });
+        $problems[1]->set_extra_metadata(contributed_by => $counciluser->id);
         $problems[1]->update({ external_id => $problems[1]->id });
         $problems[2]->update({ external_id => "123098123" });
 
@@ -280,7 +285,7 @@ FixMyStreet::override_config {
 
         my @rows = $mech->content_as_csv;
         is scalar @rows, 7, '1 (header) + 6 (reports) = 7 lines';
-        is scalar @{$rows[0]}, 23, '23 columns present';
+        is scalar @{$rows[0]}, 24, '24 columns present';
 
         is_deeply $rows[0],
             [
@@ -288,7 +293,7 @@ FixMyStreet::override_config {
                 'Created', 'Confirmed', 'Acknowledged', 'Fixed', 'Closed',
                 'Status', 'Latitude', 'Longitude', 'Query', 'Ward',
                 'Easting', 'Northing', 'Report URL', 'Device Type', 'Site Used',
-                'Reported As', 'HIAMS/Exor Ref', 'USRN',
+                'Reported As', 'HIAMS/Exor Ref', 'USRN', 'Staff Role'
             ],
             'Column headers look correct';
 
@@ -296,7 +301,62 @@ FixMyStreet::override_config {
         is $rows[1]->[22], '', 'Report without USRN has empty usrn field';
         is $rows[2]->[21], '', 'Report without HIAMS ref has empty ref field';
         is $rows[2]->[22], '20202020', 'USRN included in row if present';
+        is $rows[2]->[23], 'Role', 'Correct staff role';
         is $rows[3]->[21], '123098123', 'Older Exor report has correct ref';
+    };
+
+    subtest 'extra update CSV columns are present' => sub {
+
+        my $comment = $problems[1]->add_to_comments({
+            text => 'Test update',
+            user => $counciluser,
+            send_state => 'processed',
+            extra => {
+                contributed_by => $counciluser->id,
+            }
+        });
+
+        $mech->get_ok('/dashboard?export=1&updates=1');
+
+        my @rows = $mech->content_as_csv;
+        is scalar @rows, 4, '1 (header) + 3 (updates) = 4 lines';
+        is scalar @{$rows[0]}, 9, '9 columns present';
+
+        is_deeply $rows[0],
+            [
+                'Report ID',
+                'Update ID',
+                'Date',
+                'Status',
+                'Problem state',
+                'Text',
+                'User Name',
+                'Reported As',
+                'Staff Role',
+            ],
+            'Column headers look correct';
+
+        is $rows[3]->[8], 'Role', 'Correct role in output';
+        $comment->delete;
+    };
+
+    subtest 'role filter works okay pre-generated' => sub {
+        $problems[1]->set_extra_metadata(contributed_by => $counciluser->id);
+        $problems[1]->confirmed('2022-05-05T12:00:00');
+        $problems[1]->update;
+        $problems[2]->set_extra_metadata(contributed_by => $counciluser->id);
+        $problems[2]->confirmed('2022-05-05T12:00:00');
+        $problems[2]->update;
+        FixMyStreet::Script::CSVExport::process(dbh => FixMyStreet::DB->schema->storage->dbh);
+        $mech->get_ok('/dashboard?export=1&start_date=2022-01-01&role=' . $role->id);
+        my @rows = $mech->content_as_csv;
+        is scalar @rows, 3, '1 (header) + 2 (reports) = 3 lines';
+        $mech->get_ok('/dashboard?export=1&start_date=2022-1-1&end_date=2022-12-31');
+        @rows = $mech->content_as_csv;
+        is scalar @rows, 3, 'Bad start date parsed okay, both results from 2022 returned';
+        $mech->get_ok('/dashboard?export=1&start_date=2022-01-01&end_date=2022-05-05');
+        @rows = $mech->content_as_csv;
+        is scalar @rows, 3, 'Exact end date parsed okay, both results from 2022 returned';
     };
 
     $oxon->update({

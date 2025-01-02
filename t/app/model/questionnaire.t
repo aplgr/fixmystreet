@@ -1,3 +1,6 @@
+use FixMyStreet;
+BEGIN { FixMyStreet->test_mode(1); }
+
 package FixMyStreet::Cobrand::Tester;
 
 use parent 'FixMyStreet::Cobrand::Default';
@@ -205,12 +208,12 @@ for my $test (
 ) {
     subtest "correct questionnaire behaviour for state $test->{state} when $test->{user} $test->{description_string}" => sub {
         FixMyStreet::override_config {
-            ALLOWED_COBRANDS => 'bexley',
+            ALLOWED_COBRANDS => 'brent',
             COBRAND_FEATURES => {
-                updates_allowed => { bexley => $test->{user} },
+                updates_allowed => { brent => $test->{user} },
             },
         }, sub {
-            $problem->cobrand( 'bexley' );
+            $problem->cobrand( 'brent' );
             $problem->state( $test->{state} );
             $problem->send_questionnaire( 1 );
             $problem->update;

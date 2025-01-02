@@ -20,6 +20,8 @@ $green: #00A95D;
 $red-light: #FBE9E8;
 $red: #DC241F;
 
+$error_color: $red;
+
 $mappage-header-height: 60px;
 
 $body-font: Johnston100-Light, Arial, Helvetica, sans-serif;
@@ -57,6 +59,8 @@ $search-help-margin-desktop: -1em -1em 0em -1em;
 
 $dropzone-button-text: $white;
 
+$mobile-sticky-sidebar-button-menu-image: "menu-white";
+
 @mixin tflbutton {
   background: $beck-blue;
   border-radius: 22.5px;
@@ -71,6 +75,7 @@ $dropzone-button-text: $white;
     background: transparent;
     background-color: $blue-dark;
     color: $white !important;
+    outline-offset: 2px;
   }
 }
 
@@ -82,3 +87,5 @@ $dropzone-button-text: $white;
   box-shadow: none;
   padding: 0.4em;
 }
+
+$postcodeform-background: transparent;

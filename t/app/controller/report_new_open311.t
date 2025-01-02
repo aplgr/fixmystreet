@@ -1,5 +1,6 @@
 use FixMyStreet::TestMech;
 use Test::LongString;
+use JSON::MaybeXS;
 use Web::Scraper;
 
 # disable info logs for this test run
@@ -21,7 +22,7 @@ my $contact1 = $mech->create_contact_ok(
     category => 'Street lighting',
     email => '100',
     extra => [ { description => 'Lamppost number', code => 'number', required => 'True' },
-               { description => 'Lamppost type', code => 'type', required => 'False', values =>
+               { description => 'Lamppost type', code => 'lamptype', required => 'False', values =>
                    { value => [ { name => ['Gas'], key => ['old'] }, { name => [ 'Yellow' ], key => [ 'modern' ] } ] }
                }
              ],
@@ -87,7 +88,7 @@ $mech->create_contact_ok(
 
 my $staff_user = $mech->create_user_ok('staff@example.org', name => 'staff', from_body => $body->id);
 
-my $body3 = $mech->create_body_ok(164186, 'Northamptonshire Highways', {}, { cobrand => 'northamptonshire' });
+my $body3 = $mech->create_body_ok(164186, 'Northamptonshire Highways', { cobrand => 'northamptonshire' });
 my $ncc_staff_user = $mech->create_user_ok('ncc_staff@example.org', name => 'ncc staff', from_body => $body3->id);
 $mech->create_contact_ok(
     body_id => $body3->id,
@@ -125,7 +126,7 @@ foreach my $test (
         },
         changes => {
             number => '',
-            type   => '',
+            lamptype   => '',
         },
         errors  => [
             'This information is required',
@@ -141,7 +142,7 @@ foreach my $test (
             username_register => 'testopen311@example.com',
             category => 'Street lighting',
             number => 27,
-            type => 'old',
+            lamptype => 'old',
         },
         extra => [
             {
@@ -150,7 +151,7 @@ foreach my $test (
                 description => 'Lamppost number',
             },
             {
-                name => 'type',
+                name => 'lamptype',
                 value => 'old',
                 description => 'Lamppost type',
             }
@@ -251,7 +252,7 @@ foreach my $test (
 
         if ( $test->{fields}->{category} eq 'Street lighting' ) {
             my $result = scraper {
-                process 'select#form_type option', 'option[]' => '@value';
+                process 'select#form_lamptype option', 'option[]' => '@value';
             }
             ->scrape( $mech->response );
 
@@ -431,6 +432,21 @@ subtest "Category extras includes form disabling string" => sub {
                     },
                 ],
             };
+
+            # The old mobile app has a === comparison for disable with the string "1"
+            my $J = JSON::MaybeXS->new->allow_nonref->utf8;
+            $output = $json->{by_category} ? $json->{by_category}{Pothole}{category_extra_json}[3] : $json->{category_extra_json}[3];
+            is_deeply $output, {
+                datatype_description => 'Please please ring',
+                code => 'dangerous',
+                required => 'false',
+                values => [
+                    { 'name' => 'Yes', 'key' => 'yes', 'disable' => "1" },
+                    { 'name' => 'No', 'key' => 'no' },
+                ],
+                description => 'Is it dangerous?'
+            };
+            is $J->encode($output->{values}[0]{disable}), '"1"';
         }
 
         # Test new non-JS form disabling flow

@@ -2,12 +2,13 @@
 
 $layout_front_stats_color: $primary !default;
 $mappage-header-height: 4em !default; // eg: might want this to equal outer height of #site-header on normal pages
-$mappage-sidebar-width: 29em;
+$mappage-sidebar-width: 29em !default;
 $mappage-sidebar-padding: 1em;
 $mappage-notes-width: 15em;
-$mappage-actions-width: 25em;
-$mappage-sidebar-width--medium: 24em;
-$mappage-actions-width--medium: 20em;
+$mappage-actions-width: 25em !default;
+$mappage-actions-sidebar-width: $mappage-sidebar-width !default;
+$mappage-sidebar-width--medium: 24em !default;
+$mappage-actions-width--medium: 20em !default;
 $header-top-border-width: 0.25em !default;
 $header-top-border: $header-top-border-width solid $primary !default;
 
@@ -15,6 +16,22 @@ $container-max-width: 60em !default;
 
 $primary_link_color: null !default;
 $primary_link_hover_color: null !default;
+
+// None of the form variables control the mobile styling. For that refer to _base.scss
+// $front-main-color-desktop controls the colours of all elements inside #front-main and .postcode-form-box element.
+$front-main-color-desktop: $primary_text !default;
+// $front-main-background-desktop controls the background of the #front-main element. This is a full width element.
+$front-main-background-desktop: transparent !default;
+// $front-main-container-desktop changes the background of h1, h2, but without using the full width.
+$front-main-container-background-desktop: transparent !default;
+// $postcodeform-background-desktop controls the background of the postcode-form-box. It excludes the h1 and h2 elements.
+$postcodeform-background-desktop: transparent !default;
+$postcodeform-color-desktop: $primary_text !default;
+$form-hint-color-desktop: transparentize($postcodeform-color-desktop, 0.2) !default;
+$front-main-h2-color-desktop: transparentize($front-main-color-desktop, 0.1) !default;
+
+//This variable controls the color of .content for the front-page
+$content-background-desktop: #fff !default;
 
 .internal-link-fixed-header {
     display: block;
@@ -64,8 +81,8 @@ h1 {
   position: static;
   min-height: $mappage-header-height; // defaults to map header height; should be height of #site-header (eg: #site-logo + any vertical padding)
   height: 1px; // flex `align-items: center` doesn't work in IE10 and IE11 unless flex container has an explicit height (even when min-height means this explicit height gets ignored!)
-  @include flex-container();
-  @include flex-align(center);
+  display: flex;
+  align-items: center;
   float: $right; // we could use justify-content here, but float degrades better for non-flexbox browsers
   @if ($header-top-border) {
     margin-top: $header-top-border-width * -1; // visually compensate for border on #site-header
@@ -139,21 +156,13 @@ h1 {
     background-color: $primary;
     padding:0.25em 0.5em;
     margin:0.5em;
-    @include border-radius(0.25em);
+    border-radius: 0.25em;
     &:hover {
       background-color:$primary/1.1;
     }
   }
   span {
     color:$primary;
-  }
-  /* Stop mobile-only things */
-  span.report-a-problem-btn {
-    cursor: auto;
-  }
-  span.report-a-problem-btn:hover {
-    background-color: transparent;
-    color: $primary;
   }
 }
 
@@ -163,6 +172,15 @@ h1 {
   padding: 1em;
   background: #fff;
   color: #222;
+}
+
+.frontpage {
+  .content {
+    background: $content-background-desktop;
+    @if ($content-background-desktop == $base_bg) {
+      padding: 1em 0;
+    }
+  }
 }
 
 // map page - has fixed header and different styling
@@ -239,7 +257,7 @@ body.mappage.admin {
   }
 
   .with-actions & {
-    #{$left}: $mappage-sidebar-width + $mappage-actions-width;
+    #{$left}: $mappage-actions-sidebar-width + $mappage-actions-width;
 
     @media (max-width: 79em) {
       #{$left}: $mappage-sidebar-width--medium  + $mappage-actions-width--medium;
@@ -267,7 +285,7 @@ body.mappage.admin {
   }
 
   .with-actions & {
-    width: $mappage-sidebar-width + $mappage-actions-width;
+    width: $mappage-actions-sidebar-width + $mappage-actions-width;
     max-width: 100%; // Secondary column will squish on screens 768-960px
     padding: 0; // Padding will be handled by children of .two_column_sidebar
 
@@ -284,15 +302,15 @@ body.mappage.admin {
 // This goes inside #map_sidebar, and establishes a flex container allowing
 // us to split the sidebar into two side-by-side columns.
 .two_column_sidebar {
-  @include flex-container();
-  @include flex-align(stretch); // children will fill entire height of this element
+  display: flex;
+  align-items: stretch; // children will fill entire height of this element
   min-height: 100%; // this element will fill entire height of parent (#map_sidebar)
 
   & > * {
     // Columns should start at 50% width, and (eg: if scrollbars appear,
     // reducing the available width), shrink down to less than 50%.
-    @include box-sizing(border-box);
-    @include flex(0 1 auto);
+    box-sizing: border-box;
+    flex: 0 1 auto;
     width: 50%;
     padding: $mappage-sidebar-padding;
 
@@ -311,10 +329,14 @@ body.mappage.admin {
   // and leave the other column to shrink to the remaining space.
   #side-report {
     width: $mappage-sidebar-width;
-    @include flex(0 0 auto);
+    flex: 0 0 auto;
 
     @media (max-width: 79em) {
       width: $mappage-sidebar-width--medium;
+    }
+
+    .with-actions & {
+      width: $mappage-actions-sidebar-width;
     }
   }
 
@@ -324,6 +346,10 @@ body.mappage.admin {
 
     @media (max-width: 79em) {
       width: $mappage-sidebar-width--medium;
+    }
+
+    .with-actions & {
+      width: $mappage-actions-sidebar-width;
     }
   }
 
@@ -364,6 +390,12 @@ body.mappage.admin {
   line-height: 20px;
   border-bottom: 1px solid #E7E1C0;
   background: #FDF4C5;
+
+  a {
+    display: block;
+    width: fit-content;
+    margin-top: 0.5rem;
+  }
 
   em {
     font-style: normal;
@@ -425,54 +457,6 @@ a.platform-logo {
     padding-#{$right}: 0.25em;
 }
 
-// two thirds width page, also has option for a sidebar which can be sticky or not
-body.twothirdswidthpage {
-  #site-header + .container {
-    // This used to be on all containers, but there was a bug in Chrome, so now
-    // it's just here so that the sidebar links are still clickable with their
-    // negative z-index.
-    z-index: 1;
-  }
-  .content {
-    width:40em;
-    position: relative;
-    aside {
-      background:#eee;
-      position:absolute;
-      #{$left}: 42em;
-      top:0;
-      width:13em;
-      padding:1em;
-      h2 {
-        margin-top: 0;
-      }
-      img {
-        margin-bottom: 0.25em;
-      }
-    }
-    .sticky-sidebar {
-      position: absolute;
-      #{$left}: 42em;
-      aside {
-        position: fixed;
-        top:7em;
-        #{$left}: auto;
-      }
-    }
-  }
-
-  @media (max-width: 61em) {
-    // make twothirdswidthpage nearly as small as main
-    // .content: just enough to still fit the sidebar in
-    .content {
-      width:30em;
-      .sticky-sidebar {
-        #{$left}: 32em;
-      }
-    }
-  }
-}
-
 // Centre the login and password change pages,
 // but keep them narrow to match the report sidebar
 body.authpage {
@@ -482,7 +466,6 @@ body.authpage {
     margin-#{$right}: auto;
   }
 }
-
 
 // table wrapper - this enables anything to become a
 // table with div children as table cells
@@ -657,7 +640,7 @@ body.authpage {
     margin-top: -6px;
     #{$left}: ((16px - 6px) / 2); // horizontally centre in 16px wide parent
     background-size: 108px 12px;
-    @include svg-background-image('/cobrands/fixmystreet/images/map-tools');
+    background-image: url("/cobrands/fixmystreet/images/map-tools.svg");
   }
 
   // Expanded arrow points towards edge of window.
@@ -698,7 +681,7 @@ body.authpage {
 #key-tools {
   border-top: 0.25em solid $primary;
   margin: 0;
-  @include box-shadow(0 0 1em 1em #fff);
+  box-shadow: 0 0 1em 1em #fff;
 
   li {
     border-#{$right}: none; // undo border-right/left from _base.scss
@@ -759,12 +742,13 @@ textarea{
 /* form errors */
 div.form-error,
 p.form-error {
-  display:block;
+  display: block;
+  width: fit-content;
 }
 
 input.form-error,
 textarea.form-error {
-  @include border-radius(0 0 0.25em 0.25em);
+  border-radius: 0 0 0.25em 0.25em;
 }
 
 // If the form is .with-notes, limit the width of the inputs
@@ -782,9 +766,9 @@ textarea.form-error {
   // If the parent is .with-notes we know we have space to
   // float the sidebar content to the side of the form.
   .with-notes & {
-    float: #{$right};
+    position: absolute;
+    #{$right}: 1em;
     width: 13em;
-    margin-#{$right}: -15em;
   }
 
   div {
@@ -821,40 +805,43 @@ textarea.form-error {
 
 // big yellow bit full screen width
 #front-main {
-  color: $primary_text;
-  background: $primary;
+  color: $front-main-color-desktop;
+  background: $front-main-background-desktop;
   margin: 0;
   padding: 1em;
   #front-main-container {
     max-width: $container-max-width;
     margin: 0 auto;
+    background: $front-main-container-background-desktop;
+    @if not (($front-main-container-background-desktop == transparent) or ($front-main-container-background-desktop == none)) {
+      padding: 1em;
+    } @else {
+      padding: 0;
+    }
   }
   h2 {
     font-style:normal;
-    margin:0;
-    color: inherit;
+    color: $front-main-h2-color-desktop;
   }
-  #postcodeForm {
-    color: inherit;
-    background:none;
-    overflow:hidden;
-    padding-bottom: 0;
-    label {
-      margin:0.5em 0;
-    }
-    .form-hint {
-        margin-top: -0.25em;
-    }
-    div {
-      margin:0 auto;
-      width:20em;
-    }
+}
+
+.postcode-form-box {
+  color: $postcodeform-color-desktop;
+  background: $postcodeform-background-desktop;
+  @if not (($postcodeform-background-desktop == transparent) or ($postcodeform-background-desktop == none)) {
+    padding: 1em;
+    margin: 0 -1em;
+  } @else {
+    padding: 0;
+    margin: 1em auto 0;
   }
-  a {
-    color: $primary_link_color;
-    &:hover {
-      color: $primary_link_hover_color;
-    }
+  overflow: visible; // Doesn't cover the outline when focusing elements
+  .form-hint {
+    margin-top: -0.25em;
+    color: $form-hint-color-desktop;
+  }
+  div {
+    width:20em;
   }
 }
 
@@ -889,14 +876,13 @@ textarea.form-error {
 #front-recently h2 {
    margin-top:0;
 }
+#front-howto lite-youtube ~ h2 {
+    margin-top: 1.3333em;
+}
 
-.alerts__columns {
-    @include clearfix;
-    @include flex-container();
-    > div {
-        width: 50%;
-        margin: 0 2em;
-    }
+.cta-box__input-wrapper {
+  gap: 1rem;
+  flex-wrap: nowrap;
 }
 
 .confirmation-header {
@@ -905,11 +891,16 @@ textarea.form-error {
     text-align: $left;
     padding: flip(3em 0 3em 132px, 3em 132px 3em 0); // for tick icon
     background-position: $left 2em;
+
+    p {
+      word-break: normal;
+    }
 }
 
 // Offline reporting UI
 #front-main {
-  .js-continue-draft p {
+  .draft-info-box p {
+      margin: 0.5em 0 0 0;
       background-color: white;
       border: solid 2px #ff3333;
   }
@@ -929,7 +920,7 @@ textarea.form-error {
     width: 25%;
 }
 
-.emergency-message {
+.site-message {
   padding: 2em;
   font-size: 1.2em;
 }
@@ -1064,7 +1055,7 @@ textarea.form-error {
 
 .keyboard-pin {
   display: none;
-  background-image: url('/i/pin-green-big.png');
+  background-image: url('/i/pins/green/big.png');
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
@@ -1079,7 +1070,7 @@ textarea.form-error {
 
   &::after {
     content: "";
-    background-image: url('/i/pin-shadow-big.png');
+    background-image: url('/i/pins/shadow/big.png');
     background-size: contain;
     background-repeat: no-repeat;
     width: 88px;

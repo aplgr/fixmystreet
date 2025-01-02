@@ -159,41 +159,31 @@ a,
 }
 
 #front-main {
-    text-align: left;
+    h2 {
+        font-style: inherit;
+    }
+}
 
-    #postcodeForm {
-        background: transparent;
-        font-family: $body-font;
+.postcode-form-box {
+    font-family: $body-font;
 
-        div {
-            border: none;
-            background: transparent;
+    div {
+        border: none;
+        $border-radius: 50px;
+    }
+    input#pc {
+        @include sutton-form-input($margin: 0 0 0 0, $padding: 5px 0.5em);
+        font-size: 1.25em;
 
-            $border-radius: 50px;
-            input#pc {
-                @include sutton-form-input($margin: 0 0 0 0, $padding: 5px 0.5em);
-                font-size: 1.25em;
-
-                &:hover {
-                    background-color: $white;
-                }
-            }
-
-            input#sub {
-                margin-left: 0.5em;
-                font-size: 1.25em;
-                @include sutton-button($background-color: $green, $color: $white);
-            }
-        }
-
-        .form-hint {
-            color: $grey;
+        &:hover {
+            background-color: $white;
         }
     }
 
-    h2 {
-        font-style: inherit;
-        color: $black-l2;
+    input#sub {
+        margin-left: 0.5em;
+        font-size: 1.25em;
+        @include sutton-button($background-color: $green, $color: $white);
     }
 }
 
@@ -264,25 +254,8 @@ p.form-error {
 }
 
 .btn,
-.green-btn,
 .lbs-button--tertiary {
     @include sutton-button;
-}
-
-body.twothirdswidthpage .content .sticky-sidebar {
-    aside {
-        margin: 1em 0 2em 0;
-    }
-
-    ul {
-        display: flex;
-        flex-wrap: wrap;
-        margin: 0 -0.5em;
-    }
-
-    li {
-        margin: 0 0.5em;
-    }
 }
 
 .skiplink:focus {
@@ -431,40 +404,36 @@ body.twothirdswidthpage .content .sticky-sidebar {
     .content[role="main"] {
         background-color: $white;
 
-        label {
+        label:last-child {
             margin-bottom: 0.5em;
-        }
-
-        input#postcode {
-            @include sutton-form-input($margin: 0 0.5em 0 0, $padding: 5px 0.5em);
-
-            &:hover {
-                background-color: $white;
-            }
-        }
-
-        input#go {
-            margin-left: 5px;
-            @include sutton-button($background-color: $green, $color: $white);
         }
     }
 
-    form.waste--uprn {
-        display: flex;
-        flex-direction: row;
-        align-items: flex-end;
-
-        .govuk-button {
-            height: 40px;
-            line-height: 1rem;
-            margin-bottom: 0;
-        }
-    } 
     .govuk-button {
         @include sutton-button;
         // Corrects the default behaviour top:2px;
         &:active {
             top: 0;
+        }
+    }
+}
+
+
+.bulky__summary {
+    .item-summary-table {
+        thead {
+            background-color: $white;
+            border-color: #ccc;
+        }
+        tbody {
+            tr {
+                border-color: #ccc;
+            }
+        }
+    }
+    @media (min-width: 48em) {
+        .item-summary-table {
+            width: 100%;
         }
     }
 }

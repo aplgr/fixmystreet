@@ -20,7 +20,6 @@ fixmystreet.assets.add(defaults, {
 
     non_interactive: true,
     road: true,
-    all_categories: true,
     usrn: [
         {
             field: 'road_name',
@@ -76,22 +75,46 @@ fixmystreet.assets.add(defaults, {
     }
 });
 
+function _update_category(input, he_flag) {
+    var nh = input.val().match('NH');
+    to_show = (nh && he_flag) || (!nh && !he_flag) || input.data('nh');
+    input.parent().toggleClass('hidden-highways-choice', !to_show);
+    return to_show ? 0 : 1;
+}
+
 function regenerate_category(he_flag) {
     if (!fixmystreet.reporting_data) return;
 
-    var he_input = $('#form_category_fieldset input[value*="National Highways"]');
     if (he_flag) {
-        he_input.prop('checked', true).trigger('change', [ 'no_event' ]);
-        $('.js-reporting-page--category').addClass('js-reporting-page--skip');
-    } else {
-        $('.js-reporting-page--category').removeClass('js-reporting-page--skip');
-        var old_category = $('#form_category_fieldset input:checked');
-        if (old_category.val() == 'National Highways') {
-            old_category[0].checked = false;
-        }
-        he_input.parent('div').hide();
+        // We do not want to reenable the form if it has been disabled for
+        // a non-NH category
+        $('.js-reporting-page--next').prop('disabled', false);
     }
-    $('.js-reporting-page--next').prop('disabled', false);
+
+    // If we have come from NH site, the server has returned all the categories to show
+    if (window.location.href.indexOf('&he_referral=1') != -1) {
+        return;
+    }
+
+    $('#form_category_fieldset input').each(function() {
+        var subcategory_id = $(this).data("subcategory");
+        if (subcategory_id === undefined) {
+            _update_category($(this), he_flag);
+        } else {
+            var $subcategory = $("#subcategory_" + subcategory_id);
+            var hidden = 0;
+            var inputs = $subcategory.find('input');
+            inputs.each(function() {
+                hidden += _update_category($(this), he_flag);
+            });
+            $(this).parent().toggleClass('hidden-highways-choice', hidden == inputs.length);
+        }
+    });
+
+    // Also update any copies of subcategory inputs the category filter may have made
+    document.querySelectorAll('.js-filter-subcategory input').forEach(function(input) {
+        _update_category($(input), he_flag);
+    });
 }
 
 function he_selected() {
@@ -100,7 +123,7 @@ function he_selected() {
     regenerate_category(true);
     $(fixmystreet).trigger('report_new:highways_change');
     if (window.location.href.indexOf('&he_referral=1') != -1) {
-        $('#problem_form .js-reporting-page--next').click();
+        $('.js-reporting-page--next:visible').click();
         var message = "<div class='box-warning' id='national-highways-referral'>Please select the local council's most appropriate option for the litter or flytipping issue you would like to report.</div>";
         $('#js-top-message').append(message);
         $('.js-reporting-page--next').on('click', function() {
@@ -127,31 +150,41 @@ function add_highways_warning(road_name) {
   var $warning = $('<div class="box-warning" id="highways"><p>It looks like you clicked on the <strong>' + road_name + '</strong> which is managed by <strong>National Highways</strong>. ' +
                    'Does your report concern something on this road, or somewhere else (e.g a road crossing it)?<p></div>');
   var $page = $('<div data-page-name="highwaysengland" class="js-reporting-page js-reporting-page--active js-reporting-page--highways"></div>');
-  var $radios = $('<p class="segmented-control segmented-control--radio"></p>');
+  var $radios = $('<fiedset class="govuk-fieldset govuk-radios"></fieldset>');
 
-    $('<input>')
-        .attr('type', 'radio')
-        .attr('name', 'highways-choice')
-        .attr('id', 'js-highways')
-        .prop('checked', true)
-        .on('click', he_selected)
+    $('<div>')
+        .addClass('govuk-radios__item')
+        .append(
+            $('<input>')
+                .attr('type', 'radio')
+                .attr('name', 'highways-choice')
+                .attr('id', 'js-highways')
+                .prop('checked', true)
+                .on('click', he_selected)
+                .addClass('govuk-radios__input'),
+            $('<label>')
+                .attr('for', 'js-highways')
+                .text('On the ' + road_name)
+                .addClass('govuk-label govuk-radios__label')
+        )
         .appendTo($radios);
-    $('<label>')
-        .attr('for', 'js-highways')
-        .text('On the ' + road_name)
-        .addClass('btn')
+
+    $('<div>')
+        .addClass('govuk-radios__item')
+        .append(
+            $('<input>')
+                .attr('type', 'radio')
+                .attr('name', 'highways-choice')
+                .attr('id', 'js-not-highways')
+                .on('click', non_he_selected)
+                .addClass('govuk-radios__input'),
+            $('<label>')
+                .attr('for', 'js-not-highways')
+                .text('Somewhere else')
+                .addClass('govuk-label govuk-radios__label')
+        )
         .appendTo($radios);
-    $('<input>')
-        .attr('type', 'radio')
-        .attr('name', 'highways-choice')
-        .attr('id', 'js-not-highways')
-        .on('click', non_he_selected)
-        .appendTo($radios);
-    $('<label>')
-        .attr('for', 'js-not-highways')
-        .text('Somewhere else')
-        .addClass('btn')
-        .appendTo($radios);
+
     $radios.appendTo($warning);
     $warning.wrap($page);
     $page = $warning.parent();

@@ -1,14 +1,6 @@
 @import "_variables";
 @import "../sass/layout";
 
-body.twothirdswidthpage .content {
-    .sticky-sidebar {
-        aside {
-            top: 14em;
-        }
-    }
-}
-
 #site-logo {
     height: $mappage-header-height;
     font-size: 30px;
@@ -18,8 +10,7 @@ body.twothirdswidthpage .content {
     padding-bottom: 0;
     a,
     span,
-    a.report-a-problem-btn,
-    span.report-a-problem-btn {
+    a.report-a-problem-btn {
         line-height: 1em;
         font-size: 18px;
         cursor: pointer;
@@ -28,7 +19,7 @@ body.twothirdswidthpage .content {
         margin-left: 0.5em;
     }
 
-    span.report-a-problem-btn, span {
+    span {
         background-color: $primary_b;
         color: $nav_colour;
 
@@ -41,14 +32,13 @@ body.twothirdswidthpage .content {
 
     :first-child {
         a,
-        span,
-        span.report-a-problem-btn {
+        span {
             margin-top: 1em;
         }
     }
 
     a.report-a-problem-btn {
-        @include border-radius(0);
+        border-radius: 0;
         &:hover {
             background-color: $primary_b;
             color: $nav_colour;
@@ -57,40 +47,27 @@ body.twothirdswidthpage .content {
 }
 
 #front-main {
-    background: transparent;
-    padding: 0 1em;
-    margin: 3em auto 5em auto;
+    margin: 3em auto 4em auto;
     max-width: $container-max-width;
 
     #front-main-container {
         max-width: 40em;
         text-align: left;
-        padding: 1.5em 0 2em 0;
-        margin-left: 1em;
+        padding: 1.5em 0 1em 0;
+        margin-left: 0;
         @include hart-boxshadow(20px, 20px, 0 , 0, $primary);
-        background-color: $primary_b;
-    }
-
-    a,
-    a:hover {
-        color: $geolocation-link; // Geolocate link
-        margin-left: 2em;
-        &:hover {
-            color: $primary_b;
-        }
     }
 
     #postcode-intro {
         margin-right: 1em;
         margin-left: 1em;
     }
+}
 
-    #postcodeForm {
-        padding: 0 2em;
-        div {
-            margin-left: 0;
-        }
-    }
+.postcode-form-box {
+    max-width: 500px;
+    margin-left: 0em;
+    padding: 1em;
 }
 
 #front_stats big {

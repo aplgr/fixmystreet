@@ -1,8 +1,4 @@
-[% extra_js = [
-    version('/js/waste.js')
-] ~%]
-[% INCLUDE 'waste/header.html' %]
-
+[% PROCESS 'waste/header.html' %]
 [% PROCESS 'govuk/fields.html' %]
 [% PROCESS title title=form.title %]
 [% PROCESS errors %]
@@ -10,7 +6,7 @@
 <form method="post" id="subscribe_details">
   <div style="margin-top: 1.5em;">
     [% IF form.current_page.fields.grep('bins_wanted').size %]
-        [% PROCESS 'waste/garden/_sack_quantity.html' %]
+        [% PROCESS 'waste/garden/_sack_quantity.html' form_page='subscribe' cost=per_sack_cost %]
     [% END %]
 
     <hr class="fieldset-hr">

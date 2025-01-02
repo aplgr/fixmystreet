@@ -1,3 +1,6 @@
+use FixMyStreet;
+BEGIN { FixMyStreet->test_mode(1); }
+
 use Test::MockTime ':all';
 
 package FixMyStreet::Cobrand::No2FA;
@@ -16,9 +19,6 @@ sub dashboard_permission {
 
 package main;
 
-use strict;
-use warnings;
-
 use FixMyStreet::TestMech;
 use File::Temp 'tempdir';
 use Path::Tiny;
@@ -30,11 +30,11 @@ my $mech = FixMyStreet::TestMech->new;
 
 my $other_body = $mech->create_body_ok(1234, 'Some Other Council');
 my $body = $mech->create_body_ok(2651, 'City of Edinburgh Council');
-my @cats = ('Litter', 'Other', 'Potholes', 'Traffic lights & bells');
+my @cats = ('Litter', 'Other', 'Potholes', 'Traffic lights & bells', 'White lines');
 for my $contact ( @cats ) {
     my $c = $mech->create_contact_ok(body_id => $body->id, category => $contact, email => "$contact\@example.org");
-    if ($contact eq 'Potholes') {
-        $c->set_extra_metadata(group => ['Road']);
+    if ($contact eq 'Potholes' || $contact eq 'White lines') {
+        $c->set_extra_metadata(group => ['Road & more']);
         $c->update;
     }
 }
@@ -58,6 +58,7 @@ my $last_month = DateTime->now->subtract(months => 2);
 $mech->create_problems_for_body(2, $body->id, 'Title', { areas => ",$area_id,2651,", category => 'Potholes', cobrand => 'no2fat' });
 $mech->create_problems_for_body(3, $body->id, 'Title', { areas => ",$area_id,2651,", category => 'Traffic lights & bells', cobrand => 'no2fa', dt => $last_month });
 $mech->create_problems_for_body(1, $body->id, 'Title', { areas => ",$alt_area_id,2651,", category => 'Litter', cobrand => 'no2fa' });
+$mech->create_problems_for_body(1, $body->id, 'Title', { areas => ",$area_id,2651,", category => 'White lines', cobrand => 'no2fat' });
 
 my @scheduled_problems = $mech->create_problems_for_body(7, $body->id, 'Title', { areas => ",$area_id,2651,", category => 'Traffic lights & bells', cobrand => 'no2fa' });
 my @fixed_problems = $mech->create_problems_for_body(4, $body->id, 'Title', { areas => ",$area_id,2651,", category => 'Potholes', cobrand => 'no2fa' });
@@ -89,6 +90,7 @@ my $categories = scraper {
     process "table[id=overview] > tr", 'rows[]' => scraper {
         process 'td', 'cols[]' => 'TEXT'
     },
+    process 'th[scope=colgroup]', 'top_level[]' => 'TEXT'
 };
 
 my $UPLOAD_DIR = tempdir( CLEANUP => 1 );
@@ -156,43 +158,84 @@ FixMyStreet::override_config {
 
     subtest 'The correct categories and totals shown by default' => sub {
         $mech->get_ok("/dashboard");
-        my $expected_cats = [ 'All', 'Litter', 'Other', 'Traffic lights & bells', 'Potholes' ];
+        my $expected_cats = [ 'Litter', 'Other', 'Traffic lights & bells', 'All Road & more', 'Potholes', 'White lines' ];
         my $res = $categories->scrape( $mech->content );
-        $mech->content_contains('<optgroup label="Road">');
+        $mech->content_contains('<optgroup label="Road &amp; more">');
+        $mech->content_contains('<option value="group-Road &amp; more"');
         is_deeply( $res->{cats}, $expected_cats, 'correct list of categories' );
         # Three missing as more than a month ago
-        test_table($mech->content, 1, 0, 0, 1, 0, 0, 0, 0, 2, 0, 4, 6, 7, 3, 0, 10, 10, 3, 4, 17);
+        test_table($mech->content, 1, 0, 0, 1, 0, 0, 0, 0, 7, 3, 0, 10, 2, 0, 4, 6, 1, 0, 0, 1, 11, 3, 4, 18);
     };
 
     subtest 'test filters' => sub {
         $mech->get_ok("/dashboard");
         $mech->submit_form_ok({ with_fields => { category => 'Litter' } });
-        test_table($mech->content, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1);
+        test_table($mech->content, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1);
         $mech->submit_form_ok({ with_fields => { category => '', state => 'fixed - council' } });
-        test_table($mech->content, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4);
+        test_table($mech->content, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 0, 0, 0, 0, 0, 0, 4, 4);
         $mech->submit_form_ok({ with_fields => { state => 'action scheduled' } });
-        test_table($mech->content, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 7, 7, 0, 0, 7);
+        test_table($mech->content, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 7);
         my $start = DateTime->now->subtract(months => 3)->strftime('%Y-%m-%d');
         my $end = DateTime->now->subtract(months => 1)->strftime('%Y-%m-%d');
         $mech->submit_form_ok({ with_fields => { state => '', start_date => $start, end_date => $end } });
-        test_table($mech->content, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 3, 3, 0, 0, 3);
+        test_table($mech->content, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 3);
+        $mech->get_ok("/dashboard?category=Litter&category=Potholes");
+        test_table($mech->content, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 4, 6, 0, 0, 0, 0, 3, 0, 4, 7);
+        $mech->get_ok("/dashboard?category=Traffic+lights+%26+bells");
+        $mech->content_contains("<option value='Traffic lights &amp; bells' selected>");
+        test_table($mech->content, 0, 0, 0, 0, 0, 0, 0, 0, 7, 3, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 7, 3, 0, 10);
+        $mech->get_ok("/dashboard?category=group-Road+%26+more");
+        $mech->content_contains('<option value="group-Road &amp; more" selected>');
+        test_table($mech->content, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 4, 6, 1, 0, 0, 1, 3, 0, 4, 7);
+        $mech->get_ok("/dashboard?category=group-Road+%26+more&category=Potholes");
+        test_table($mech->content, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 4, 6, 1, 0, 0, 1, 3, 0, 4, 7);
+        $mech->get_ok("/dashboard?category=group-Road+%26+more&category=Litter");
+        test_table($mech->content, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 4, 6, 1, 0, 0, 1, 4, 0, 4, 8);
     };
 
     subtest 'test grouping' => sub {
         $mech->get_ok("/dashboard?group_by=category");
-        test_table($mech->content, 1, 0, 6, 10, 17);
+        my $top_level = test_table($mech->content, 1, 0, 10, 6, 1, 18);
+        is_deeply $top_level, ['Road & more'], 'Road group created';
         $mech->get_ok("/dashboard?group_by=state");
-        test_table($mech->content, 3, 7, 4, 3, 17);
+        test_table($mech->content, 4, 7, 4, 3, 18);
         $mech->get_ok("/dashboard?start_date=2000-01-01&group_by=month");
-        test_table($mech->content, 0, 17, 17, 3, 0, 3, 3, 17, 20);
+        test_table($mech->content, 0, 18, 18, 3, 0, 3, 3, 18, 21);
+        my $pothole = FixMyStreet::DB->resultset('Contact')->find_or_create({ category => 'Potholes'});
+        $pothole->set_extra_metadata(group => ['Road & more', 'Pavement']);
+        $pothole->update;
+        $mech->get_ok("/dashboard?group_by=category");
+        $top_level = test_table($mech->content, 1, 0, 10, 1, 6, 18);
+        is_deeply $top_level, ['Road & more', 'Multiple'], 'Road and Multiple groups created';
+        $pothole->set_extra_metadata(group => ['Road & more']);
+        $pothole->update;
     };
 
     subtest 'test roles' => sub {
         # All the fixed (Pothole) reports only
         $mech->get_ok("/dashboard?group_by=category&role=" . $role->id);
-        test_table($mech->content, 0, 0, 4, 0, 4);
+        test_table($mech->content, 0, 0, 0, 4, 0, 4);
         $mech->get_ok("/dashboard?export=2&group_by=category&role=" . $role->id);
         $mech->content_contains('role-' . $role->id, "File link created with role");
+    };
+
+    subtest 'csv for multiple categories' => sub {
+        $mech->get_ok("/dashboard?category=Litter&category=Potholes&export=2");
+        $mech->content_contains('www.example.org-body-' . $body->id . '-category-Litter,Potholes-start_date-2014-01-02.csv');
+        $mech->get_ok("/dashboard?category=Litter&category=Potholes&category=Traffic+lights+%26+bells&export=2");
+        $mech->content_contains('www.example.org-body-' . $body->id . '-category-multiple-categories-start_date-2014-01-02.csv');
+        $mech->get_ok("/dashboard?category=Litter&category=Potholes&export=1");
+        my @rows = $mech->content_as_csv;
+        is scalar @rows, 8, '1 (header) + 7 (reports) found = 8 lines';
+        $mech->get_ok("/dashboard?category=group-Road+%26+more&export=1");
+        @rows = $mech->content_as_csv;
+        is scalar @rows, 8, '1 (header) + 7 (reports) found = 8 lines';
+        $mech->get_ok("/dashboard?category=group-Road+%26+more&category=Potholes&export=1");
+        @rows = $mech->content_as_csv;
+        is scalar @rows, 8, '1 (header) + 7 (reports) found = 8 lines';
+        $mech->get_ok("/dashboard?category=group-Road+%26+more&category=Litter&export=1");
+        @rows = $mech->content_as_csv;
+        is scalar @rows, 9, '1 (header) + 8 (reports) found = 9 lines';
     };
 
     subtest 'export as csv' => sub {
@@ -203,7 +246,7 @@ FixMyStreet::override_config {
         });
         $mech->get_ok('/dashboard?export=1');
         my @rows = $mech->content_as_csv;
-        is scalar @rows, 19, '1 (header) + 18 (reports) = 19 lines';
+        is scalar @rows, 20, '1 (header) + 19 (reports) = 20 lines';
 
         is scalar @{$rows[0]}, 22, '22 columns present';
 
@@ -237,7 +280,7 @@ FixMyStreet::override_config {
         is $rows[5]->[15], 'Trowbridge', 'Ward column is name not ID';
         is $rows[5]->[16], '529025', 'Correct Easting conversion';
         is $rows[5]->[17], '179716', 'Correct Northing conversion';
-        is $rows[18]->[15], 'Bishops Cannings', 'Can see old ward';
+        is $rows[19]->[15], 'Bishops Cannings', 'Can see old ward';
     };
 
     subtest 'export updates as csv' => sub {
@@ -319,6 +362,7 @@ FixMyStreet::override_config {
 FixMyStreet::override_config {
     ALLOWED_COBRANDS => 'tester',
     MAPIT_URL => 'http://mapit.uk/',
+    PHOTO_STORAGE_OPTIONS => { UPLOAD_DIR => $UPLOAD_DIR },
 }, sub {
     subtest 'no body or export, 404' => sub {
         $mech->get('/dashboard');
@@ -336,12 +380,14 @@ FixMyStreet::override_config {
 
 sub test_table {
     my ($content, @expected) = @_;
+
     my $res = $categories->scrape( $mech->content );
     my @actual;
     foreach my $row ( @{ $res->{rows} }[1 .. 11] ) {
         push @actual, @{$row->{cols}} if $row->{cols};
     }
     is_deeply \@actual, \@expected;
+    return $res->{top_level};
 }
 
 restore_time;

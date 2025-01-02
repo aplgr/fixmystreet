@@ -32,8 +32,7 @@
     }
 
     a,
-    span,
-    span.report-a-problem-btn {
+    span {
         padding: 0.5em 0.75em;
         font-size: 18px;
         font-weight: 700;
@@ -50,30 +49,17 @@
 }
 
 #front-main {
-    margin: 0 auto;
     margin-top: 60px;
     padding: 0 1em;
-    max-width: $container-max-width;
-    background: transparent;
 
     #front-main-container {
-        max-width: none;
-        background: $white;
-        padding: 4%;
+        padding: 3em;
         border-top: 4px solid $green;
-    }
-
-    #postcodeForm {
-        overflow: visible;
-
-        div {
-            margin: 0;
-        }
     }
 }
 
 .content {
-    padding: 4%;
+    padding: 3em;
 }
 
 input.form-error,
@@ -87,18 +73,6 @@ textarea.form-error {
 
 body.mappage #site-header {
     height: $mappage-header-height - 3px;
-}
-
-body.twothirdswidthpage .content .sticky-sidebar {
-    position: static;
-
-    aside {
-        position: static;
-        background: transparent;
-        padding: 0;
-        width: auto;
-        margin: 0 0 2em 0;
-    }
 }
 
 // FOOTER

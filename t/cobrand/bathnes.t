@@ -1,5 +1,7 @@
 use Test::MockModule;
 use FixMyStreet::TestMech;
+use File::Temp 'tempdir';
+use FixMyStreet::Script::CSVExport;
 my $mech = FixMyStreet::TestMech->new;
 
 # disable info logs for this test run
@@ -9,10 +11,18 @@ END { FixMyStreet::App->log->enable('info'); }
 my $cobrand = Test::MockModule->new('FixMyStreet::Cobrand::BathNES');
 $cobrand->mock('area_types', sub { [ 'UTA' ] });
 
-my $body = $mech->create_body_ok(2551, 'Bath and North East Somerset Council', {}, { cobrand => 'bathnes' });
-my @cats = ('Litter', 'Other', 'Potholes', 'Traffic lights');
+my $body = $mech->create_body_ok(2551, 'Bath and North East Somerset Council', { cobrand => 'bathnes' });
+my @cats = ('Litter', 'Other', 'Potholes', 'Traffic lights', 'Disabled');
 for my $contact ( @cats ) {
-    $mech->create_contact_ok(body_id => $body->id, category => $contact, email => "$contact\@example.org");
+   my $c =  $mech->create_contact_ok(body_id => $body->id, category => $contact, email => "$contact\@example.org");
+    if ($contact eq 'Disabled') {
+        $c->push_extra_fields({
+            code => '_fms_disable_',
+            'disable_form' => 'true',
+            description => 'form_disabled',
+        });
+        $c->update;
+    }
 }
 my $superuser = $mech->create_user_ok('superuser@example.com', name => 'Super User', is_superuser => 1);
 my $counciluser = $mech->create_user_ok('counciluser@example.com', name => 'Council User', from_body => $body);
@@ -57,9 +67,11 @@ $mech->create_problems_for_body(1, $body->id, 'Title', {
     }
 });
 
+my $UPLOAD_DIR = tempdir( CLEANUP => 1 );
 FixMyStreet::override_config {
     ALLOWED_COBRANDS => [ 'bathnes' ],
     MAPIT_URL => 'http://mapit.uk/',
+    PHOTO_STORAGE_OPTIONS => { UPLOAD_DIR => $UPLOAD_DIR },
 }, sub {
 
 subtest 'cobrand displays council name' => sub {
@@ -115,6 +127,13 @@ subtest 'extra CSV columns are absent if permission not granted' => sub {
             'Reported As',
         ],
         'Column headers look correct';
+
+    # And if pre-generated, is the same
+    FixMyStreet::Script::CSVExport::process(dbh => FixMyStreet::DB->schema->storage->dbh);
+    $mech->get_ok('/dashboard?export=1');
+    @rows = $mech->content_as_csv;
+    is scalar @rows, 5, '1 (header) + 4 (reports) = 5 lines';
+    is scalar @{$rows[0]}, 21, '21 columns present';
 };
 
 subtest "Custom CSV fields permission can be granted" => sub {
@@ -242,7 +261,7 @@ subtest 'report a problem link post-report is not location-specific' => sub {
             'submit report form ok'
         );
         $mech->content_like(qr/Your reference for this report is (\d+),/);
-        $mech->base_like(qr(/report/new$), 'expected redirect back to /report/new');
+        like $mech->uri->path, qr{/report/confirmation/(\d+)}, "ended up at the confirmation page";
 
         my $tree = HTML::TreeBuilder->new_from_content($mech->content());
         my $report_link = $tree->look_down(
@@ -257,6 +276,20 @@ subtest 'report a problem link post-report is not location-specific' => sub {
     }
 };
 
+FixMyStreet::override_config {
+    ALLOWED_COBRANDS => [ 'bathnes' ],
+    MAPIT_URL => 'http://mapit.uk/',
+}, sub {
+
+subtest 'geo-located /around is zoomed in further' => sub {
+        $mech->get_ok('/around?longitude=-2.364050&latitude=51.386269');
+        $mech->content_contains("data-zoom=3");
+        $mech->get_ok('/around?longitude=-2.364050&latitude=51.386269&geolocate=1');
+        $mech->content_contains("data-zoom=5");
+}
+
+};
+
 subtest 'check cobrand correctly reset on each request' => sub {
     FixMyStreet::override_config {
         'ALLOWED_COBRANDS' => [ 'bathnes', 'fixmystreet' ],
@@ -267,6 +300,21 @@ subtest 'check cobrand correctly reset on each request' => sub {
         $mech->host('bathnes.fixmystreet.com');
         $mech->get_ok( '/contact?reject=1&id=' . $problem->id );
         $mech->content_contains('Reject report');
+    }
+};
+
+subtest "staff can't allocate a report to a disabled category" => sub {
+    FixMyStreet::override_config {
+        'ALLOWED_COBRANDS' => [ 'bathnes' ],
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        my ($p) = $mech->create_problems_for_body(1, $body->id, 'Title', {
+            areas => ",2551,", category => 'Potholes', cobrand => 'bathnes',
+            user => $normaluser, service => 'iOS'
+        });
+        $mech->log_in_ok( $superuser->email );
+        $mech->get_ok('/admin/report_edit/' . $p->id);
+        $mech->content_contains('<option value="Disabled" disabled>Disabled (disabled)</option>');
     }
 };
 

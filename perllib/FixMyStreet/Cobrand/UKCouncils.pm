@@ -1,9 +1,7 @@
 package FixMyStreet::Cobrand::UKCouncils;
 use parent 'FixMyStreet::Cobrand::UK';
 
-use strict;
-use warnings;
-
+use Moo;
 use Carp;
 use List::Util qw(min max);
 use URI::Escape;
@@ -12,6 +10,7 @@ use URI;
 use Try::Tiny;
 use JSON::MaybeXS;
 use XML::Simple;
+use FixMyStreet::Template;
 
 sub is_council {
     1;
@@ -39,6 +38,7 @@ sub path_to_email_templates {
     my $paths = [
         FixMyStreet->path_to( 'templates', 'email', $self->moniker, $lang_code ),
         FixMyStreet->path_to( 'templates', 'email', $self->moniker ),
+        FixMyStreet->path_to( 'templates', 'email', 'fixmystreet-uk-councils' ),
         FixMyStreet->path_to( 'templates', 'email', 'fixmystreet.com'),
     ];
     return $paths;
@@ -68,7 +68,7 @@ sub problems_restriction {
     if (my $date = $self->cut_off_date) {
         my $table = ref $rs eq 'FixMyStreet::DB::ResultSet::Nearby' ? 'problem' : 'me';
         $rs = $rs->search({
-            "$table.confirmed" => { '>=', $date }
+            "$table.created" => { '>=', $date }
         });
     }
     return $rs;
@@ -82,7 +82,7 @@ sub problems_sql_restriction {
         $q .= "AND regexp_split_to_array(bodies_str, ',') && ARRAY['$body_id']";
     }
     if (my $date = $self->cut_off_date) {
-        $q .= " AND confirmed >= '$date'";
+        $q .= " AND created >= '$date'";
     }
     return $q;
 }
@@ -91,7 +91,18 @@ sub problems_on_map_restriction {
     my ($self, $rs) = @_;
     # If we're a two-tier council show all problems on the map and not just
     # those for this cobrand's council to reduce duplicate reports.
-    return $self->is_two_tier ? $rs : $self->problems_restriction($rs);
+    # (but still respect the cut-off date)
+    if ($self->is_two_tier) {
+        if (my $date = $self->cut_off_date) {
+            my $table = ref $rs eq 'FixMyStreet::DB::ResultSet::Nearby' ? 'problem' : 'me';
+            $rs = $rs->search({
+                "$table.created" => { '>=', $date }
+            });
+        }
+        return $rs;
+    } else {
+        return $self->problems_restriction($rs);
+    }
 }
 
 sub updates_restriction {
@@ -140,6 +151,11 @@ sub users_restriction {
     return $rs->search($query);
 }
 
+sub users_staff_admin {
+    my $self = shift;
+    return FixMyStreet::DB->resultset('User')->search({ is_superuser => 0, from_body => $self->body->id });
+}
+
 sub base_url {
     my $self = shift;
 
@@ -172,15 +188,41 @@ sub area_check {
 
     my $councils = $params->{all_areas};
 
-    # The majority of cobrands only cover a single area, but e.g. Northamptonshire
-    # covers multiple so we need to handle that situation.
-    my $council_area_ids = $self->council_area_id;
-    $council_area_ids = [ $council_area_ids ] unless ref $council_area_ids eq 'ARRAY';
-    foreach (@$council_area_ids) {
-        return 1 if defined $councils->{$_};
-    }
+    return 1 if $self->responsible_for_areas($councils);
 
     return ( 0, $self->area_check_error_message($params, $context) );
+}
+
+=head2 responsible_for_areas
+
+Tests to see if the cobrand is responsible for a location. This is done through
+checking if it has the area set in council_area_id and also checking if the
+coverage is limited only to an overlapping asset by testing the hook
+report_is_on_cobrand_asset
+
+=cut
+
+sub responsible_for_areas {
+    my ($self, $councils) = @_;
+
+    if ($self->can('check_report_is_on_cobrand_asset')) {
+        # This will need changing for two tier councils
+        if (grep ($self->council_area_id->[0] == $_, keys %$councils)) {
+            return 1;
+        } else {
+            return $self->check_report_is_on_cobrand_asset;
+        }
+    } else {
+        # The majority of cobrands only cover a single area, but e.g. Northamptonshire
+        # covers multiple so we need to handle that situation.
+        my $council_area_ids = $self->council_area_id;
+        $council_area_ids = [ $council_area_ids ] unless ref $council_area_ids eq 'ARRAY';
+        foreach (@$council_area_ids) {
+            return 1 if defined $councils->{$_};
+        }
+
+        return 0;
+    }
 }
 
 sub area_check_error_message {
@@ -209,9 +251,8 @@ sub all_reports_single_body {
 
 sub reports_body_check {
     my ( $self, $c, $code ) = @_;
-
-    # Deal with Bexley/Greenwich name not starting with short name
-    if ($code =~ /bexley|greenwich/i) {
+    # Some full names do not start with short name
+    if ( $self->is_london_or_royal($code) ) {
         my $body = $c->model('DB::Body')->search( { name => { -like => "%$code%" } } )->single;
         $c->stash->{body} = $body;
         return $body;
@@ -233,7 +274,10 @@ sub reports_body_check {
 sub recent_photos {
     my ( $self, $area, $num, $lat, $lon, $dist ) = @_;
     $num = 2 if $num == 3;
-    return $self->problems->recent_photos( $num, $lat, $lon, $dist );
+    return $self->problems->recent_photos({
+        num => $num,
+        point => [$lat, $lon, $dist]
+    });
 }
 
 # Returns true if the cobrand owns the problem, i.e. it was sent to the body
@@ -250,7 +294,7 @@ sub owns_problem {
     }
 
     foreach (@bodies) {
-        return 1 if $_->get_extra_metadata('cobrand', '') eq $self->moniker;
+        return 1 if ($_->cobrand||'') eq $self->moniker;
     }
 }
 
@@ -258,7 +302,7 @@ sub owns_problem {
 # then show pins for the other council as grey
 sub pin_colour {
     my ( $self, $p, $context ) = @_;
-    return 'grey' if !$self->owns_problem( $p );
+    return 'grey' if $context ne 'reports' && !$self->owns_problem($p);
     return $self->next::method($p, $context);
 }
 
@@ -298,8 +342,8 @@ sub admin_allow_user {
     return 1 if $user->is_superuser;
     return undef unless defined $user->from_body;
     # Make sure TfL staff can't access other London cobrand admins
-    return undef if $user->from_body->name eq 'TfL';
-    return $user->from_body->get_extra_metadata('cobrand', '') eq $self->moniker;
+    return undef if $user->from_body->get_column('name') eq 'TfL';
+    return ($user->from_body->cobrand||'') eq $self->moniker;
 }
 
 sub admin_show_creation_graph { 0 }
@@ -312,6 +356,11 @@ sub available_permissions {
     $perms->{Problems}->{contribute_as_body} = "Create reports/updates as " . $self->council_name;
     $perms->{Problems}->{view_body_contribute_details} = "See user detail for reports created as " . $self->council_name;
     $perms->{Users}->{user_assign_areas} = "Assign users to areas in " . $self->council_name;
+
+    my $features = $self->feature('waste_features') || {};
+    if ( $features->{admin_config_enabled} ) {
+        $perms->{Waste}->{wasteworks_config} = "Can edit WasteWorks configuration";
+    }
 
     return $perms;
 }
@@ -332,7 +381,10 @@ sub report_sent_confirmation_email {
 
 sub munge_around_category_where {
     my ($self, $where) = @_;
-    $where->{extra} = [ undef, { -not_like => '%,T4:type,T5:waste,%' } ];
+    $where->{'-or'} = [
+        extra => undef,
+        -not => { extra => { '@>' => '{"type":"waste"}' } }
+    ];
 }
 
 sub munge_reports_category_list {
@@ -349,7 +401,7 @@ sub munge_reports_category_list {
 sub munge_report_new_bodies {
     my ($self, $bodies) = @_;
 
-    my %bodies = map { $_->name => 1 } values %$bodies;
+    my %bodies = map { $_->get_column('name') => 1 } values %$bodies;
     if ( $bodies{'TfL'} ) {
         # Presented categories vary if we're on/off a red route
         my $tfl = FixMyStreet::Cobrand::TfL->new({ c => $self->{c} });
@@ -376,6 +428,8 @@ sub munge_report_new_bodies {
         my $thamesmead = FixMyStreet::Cobrand::Thamesmead->new({ c => $self->{c} });
         $thamesmead->munge_thamesmead_body($bodies);
     }
+
+    $self->call_hook(munge_overlapping_asset_bodies => $bodies);
 }
 
 sub munge_report_new_contacts {
@@ -392,7 +446,7 @@ sub munge_report_new_contacts {
         @$contacts = grep { !$_->get_extra_metadata('type') } @$contacts;
     }
 
-    my %bodies = map { $_->body->name => $_->body } @$contacts;
+    my %bodies = map { $_->body->get_column('name') => $_->body } @$contacts;
     if ( $bodies{'TfL'} ) {
         # Presented categories vary if we're on/off a red route
         my $tfl = FixMyStreet::Cobrand->get_class_for_moniker( 'tfl' )->new({ c => $self->{c} });
@@ -408,13 +462,26 @@ sub munge_report_new_contacts {
         my $southwark = FixMyStreet::Cobrand::Southwark->new({ c => $self->{c} });
         $southwark->munge_categories($contacts);
     }
+
+    if ( $bodies{'National Highways'} ) {
+        my $nh = FixMyStreet::Cobrand::HighwaysEngland->new({ c => $self->{c} });
+        $nh->national_highways_cleaning_groups($contacts);
+    }
+
+    $self->call_hook(munge_cobrand_asset_categories => $contacts);
+
 }
 
-sub munge_mixed_category_groups {
-    my ($self, $list) = @_;
-    my $nh = FixMyStreet::Cobrand::HighwaysEngland->new({ c => $self->{c} });
-    $nh->national_highways_cleaning_groups($list);
-}
+=item wasteworks_config
+
+Returns any database-stored WasteWorks configuration.
+
+=cut
+
+has wasteworks_config => (
+    is => 'lazy',
+    default => sub { $_[0]->body->get_extra_metadata( 'wasteworks_config', {} ) },
+);
 
 sub open311_extra_data {
     my $self = shift;
@@ -638,6 +705,91 @@ sub csv_staff_user_lookup {
         my $user = FixMyStreet::DB->resultset('User')->find({ id => $contributed_by });
         $user ? $user->email : '';
     };
+}
+
+sub csv_staff_roles {
+    my ($self, $user_lookup) = @_;
+
+    my $userroles = FixMyStreet::DB->resultset("UserRole")->search({
+        user_id => [ keys %$user_lookup ],
+    }, {
+        prefetch => 'role'
+    });
+    my %userroles;
+    while (my $userrole = $userroles->next) {
+        my $user_id = $userrole->user_id;
+        my $role = $userrole->role->name;
+        push @{$userroles{$user_id}}, $role;
+    }
+    return \%userroles;
+}
+
+sub csv_active_planned_reports {
+    my ($self) = @_;
+
+    my %reports_to_user;
+    my @cobrand_users = FixMyStreet::DB->resultset('User')->search(
+        { from_body => $self->body->id },
+        { prefetch => 'active_user_planned_reports' },
+    );
+
+    for my $user (@cobrand_users) {
+        map { $reports_to_user{$_->report_id} = $user->name } $user->active_user_planned_reports->all;
+    }
+    return \%reports_to_user;
+}
+
+sub csv_update_alerts {
+    my ($self) = @_;
+
+    my %ids_to_alert;
+
+    my @results = FixMyStreet::DB->resultset('Alert')->search({
+        alert_type => 'new_updates',
+        confirmed => 1,
+        whendisabled => undef,
+    }, {columns => ['parameter']})->all;
+
+    if (@results) {
+        %ids_to_alert = map { $_->parameter, ++$ids_to_alert{$_->parameter} } @results;
+    };
+
+    return \%ids_to_alert;
+}
+
+sub nearby_distances {
+    my $self = shift;
+    return $self->feature('nearby_distances') || $self->next::method();
+}
+
+=head2 _post_report_sent_close
+
+Helper function to mark a report as closed when it's sent, including an update.
+
+=cut
+
+sub _post_report_sent_close {
+    my ($self, $problem, $template) = @_;
+
+    my @include_path = @{ $self->path_to_web_templates };
+    push @include_path, FixMyStreet->path_to( 'templates', 'web', 'default' );
+    my $tt = FixMyStreet::Template->new({
+        INCLUDE_PATH => \@include_path,
+        disable_autoescape => 1,
+    });
+    my $text;
+    $tt->process($template, {}, \$text);
+
+    $problem->update({
+        state => 'closed'
+    });
+    $problem->add_to_comments({
+        text => $text,
+        user_id => $self->body->comment_user_id,
+        problem_state => 'closed',
+        cobrand => $problem->cobrand,
+        send_state => 'processed',
+    });
 }
 
 1;

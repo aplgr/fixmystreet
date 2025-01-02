@@ -1,9 +1,14 @@
 use CGI::Simple;
 use Test::MockModule;
 use Test::MockTime qw(:all);
+use File::Temp 'tempdir';
 use FixMyStreet::TestMech;
+use FixMyStreet::Script::Alerts;
 use FixMyStreet::Script::Reports;
 use Catalyst::Test 'FixMyStreet::App';
+
+FixMyStreet::App->log->disable('info');
+END { FixMyStreet::App->log->enable('info'); }
 
 use_ok 'FixMyStreet::Cobrand::CentralBedfordshire';
 
@@ -34,9 +39,14 @@ $ukc->mock('_fetch_features', sub {
 my $mech = FixMyStreet::TestMech->new;
 
 my $body = $mech->create_body_ok(21070, 'Central Bedfordshire Council', {
-    send_method => 'Open311', api_key => 'key', 'endpoint' => 'e', 'jurisdiction' => 'j' }, { cobrand => 'centralbedfordshire' });
+    send_method => 'Open311', api_key => 'key', 'endpoint' => 'e', 'jurisdiction' => 'j', cobrand => 'centralbedfordshire' });
 $mech->create_contact_ok(body_id => $body->id, category => 'Bridges', email => "BRIDGES");
 $mech->create_contact_ok(body_id => $body->id, category => 'Potholes', email => "POTHOLES");
+$mech->create_contact_ok(body_id => $body->id, category => 'Jadu', email => "Jadu");
+
+my $normal_user = $mech->create_user_ok('test@example.net', name => 'Normal User');
+my $staffuser = $mech->create_user_ok('counciluser@example.com', name => 'Council User',
+    from_body => $body, password => 'password');
 
 my ($report) = $mech->create_problems_for_body(1, $body->id, 'Test Report', {
     category => 'Bridges', cobrand => 'centralbedfordshire',
@@ -100,6 +110,7 @@ FixMyStreet::override_config {
     subtest "it doesn't show old reports on the cobrand" => sub {
         $mech->create_problems_for_body(1, $body->id, 'An old problem made before Central Beds FMS launched', {
             state => 'fixed - user',
+            created => '2018-12-25 09:00',
             confirmed => '2018-12-25 09:00',
             lastupdate => '2018-12-25 09:00',
             latitude => 52.030692,
@@ -132,6 +143,44 @@ FixMyStreet::override_config {
 
     };
 };
+
+FixMyStreet::override_config {
+    ALLOWED_COBRANDS => [ 'centralbedfordshire' ],
+    MAPIT_URL => 'http://mapit.uk/',
+    STAGING_FLAGS => { send_reports => 1, skip_checks => 0 },
+}, sub {
+    subtest "it doesn't send report logged or update emails for Jadu categories" => sub {
+        $mech->clear_emails_ok();
+
+        $mech->log_in_ok( $normal_user->email );
+        $mech->get_ok('/report/new?latitude=52.03553&longitude=-0.36067');
+        $mech->submit_form_ok({
+            with_fields => {
+                title => 'Jadu no emails test.',
+                detail => 'Jadu no emails test detail.',
+                category => 'Jadu',
+            }
+        });
+
+        FixMyStreet::Script::Reports::send();
+        $mech->email_count_is(0);
+
+        my $report = FixMyStreet::DB->resultset('Problem')->find( { title => "Jadu no emails test." } );
+        FixMyStreet::DB->resultset('Comment')->find_or_create(
+            {
+                problem_id => $report->id,
+                user_id    => $staffuser->id,
+                name       => 'Staff',
+                mark_fixed => 'false',
+                text       => 'This is some update text',
+                state      => 'confirmed',
+            }
+        );
+        FixMyStreet::Script::Alerts::send_updates();
+        $mech->email_count_is(0);
+    };
+};
+
 
 subtest "it still shows old reports on fixmystreet.com" => sub {
     FixMyStreet::override_config {
@@ -180,17 +229,19 @@ subtest 'check geolocation overrides' => sub {
 
 
 subtest 'Dashboard CSV extra columns' => sub {
-    my $staffuser = $mech->create_user_ok('counciluser@example.com', name => 'Council User',
-        from_body => $body, password => 'password');
+    my $UPLOAD_DIR = tempdir( CLEANUP => 1 );
     $mech->log_in_ok( $staffuser->email );
+    $report->update_extra_field({ name => 'Type', value => ['Furniture', 'Bin bags'] });
+    $report->update;
     FixMyStreet::override_config {
         MAPIT_URL => 'http://mapit.uk/',
         ALLOWED_COBRANDS => 'centralbedfordshire',
+        PHOTO_STORAGE_OPTIONS => { UPLOAD_DIR => $UPLOAD_DIR },
     }, sub {
         $mech->get_ok('/dashboard?export=1');
     };
     $mech->content_contains('"Site Used","Reported As",CRNo');
-    $mech->content_contains('centralbedfordshire,,' . $report->external_id);
+    $mech->content_contains('centralbedfordshire,,' . $report->external_id . ',"Bin bags;Furniture"');
 };
 
 

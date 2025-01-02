@@ -1,22 +1,25 @@
+use FixMyStreet;
+BEGIN { FixMyStreet->test_mode(1); }
+
 package FixMyStreet::Cobrand::Birmingham;
 use parent 'FixMyStreet::Cobrand::UKCouncils';
 sub council_area_id { 2514 }
 sub cut_off_date { DateTime->now->subtract(days => 30)->strftime('%Y-%m-%d') }
 
 package main;
-use utf8;
-use FixMyStreet::Script::UpdateAllReports;
-
 use Test::MockModule;
 use FixMyStreet::TestMech;
+use FixMyStreet::Script::UpdateAllReports;
 use FixMyStreet::Script::Reports;
 my $mech = FixMyStreet::TestMech->new;
 
 my $resolver = Test::MockModule->new('Email::Valid');
 $resolver->mock('address', sub { $_[1] });
 
-my $body = $mech->create_body_ok( 2514, 'Birmingham', {}, { cobrand => 'birmingham' } );
-$mech->create_body_ok( 2482, 'Bromley', {}, { cobrand => 'bromley' });
+my $body = $mech->create_body_ok( 2514, 'Birmingham', { cobrand => 'birmingham' } );
+$mech->create_body_ok( 2482, 'Bromley', { cobrand => 'bromley' });
+
+$mech->create_body_ok(2482, 'Bike provider');
 
 my $contact = $mech->create_contact_ok(
     body_id => $body->id,
@@ -38,6 +41,11 @@ FixMyStreet::override_config {
     MAPIT_URL => 'http://mapit.uk/',
     TEST_DASHBOARD_DATA => $data,
     ALLOWED_COBRANDS => [ 'fixmystreet', 'birmingham' ],
+    COBRAND_FEATURES => {
+        categories_restriction_bodies => {
+            tfl => [ 'Bike provider' ],
+        }
+    },
 }, sub {
     ok $mech->host('www.fixmystreet.com');
 
@@ -120,6 +128,14 @@ FixMyStreet::override_config {
         $mech->content_lacks('Where we send Birmingham');
     };
 
+    subtest 'Check All Reports page for bike bodies' => sub {
+        $mech->get_ok('/reports/Bike+provider');
+        $mech->content_contains('Bromley');
+        $mech->content_lacks('Trowbridge');
+        $mech->get_ok('/reports/Bike+provider/Bromley');
+        is $mech->uri->path, '/reports/Bike+provider/Bromley';
+    };
+
     subtest 'check average fix time respects cobrand cut-off date and non-standard reports' => sub {
         $mech->log_in_ok('someone@birmingham.gov.uk');
         my $user = FixMyStreet::DB->resultset('User')->find_or_create({ email => 'counciluser@example.org' });
@@ -168,11 +184,6 @@ FixMyStreet::override_config {
         });
 
         $mech->get_ok('/about/council-dashboard');
-        $mech->content_contains('How responsive is Birmingham?');
-        # Average of 55 days means the older problem was included in the calculation.
-        $mech->content_lacks('<td>Birmingham</td><td>55 days</td></tr>');
-        # 10 days means the older problem was ignored.
-        $mech->content_contains('<td>Birmingham</td><td>10 days</td></tr>');
     };
 };
 
@@ -199,6 +210,12 @@ subtest 'check heatmap page for cllr' => sub {
 
 FixMyStreet::override_config {
     ALLOWED_COBRANDS => 'fixmystreet',
+    MAPIT_URL => 'http://mapit.uk/',
+    COBRAND_FEATURES => {
+        extra_parishes => {
+            fixmystreet => [ 59087 ],
+        }
+    }
 }, sub {
     subtest 'test enforced 2FA for superusers' => sub {
         my $test_email = 'test@example.com';
@@ -212,36 +229,152 @@ FixMyStreet::override_config {
             { with_fields => { username => $test_email, password_sign_in => 'password' } },
             "sign in using form" );
         $mech->content_contains('requires two-factor');
+
+        # Sign up for 2FA
+        $mech->submit_form_ok({ with_fields => { '2fa_action' => 'activate' } }, "submit 2FA activation");
+        my ($token) = $mech->content =~ /name="secret32" value="([^"]*)">/;
+        use Auth::GoogleAuth;
+        my $auth = Auth::GoogleAuth->new({ secret32 => $token });
+        my $code = $auth->code;
+        $mech->submit_form_ok({ with_fields => { '2fa_code' => $code } }, "provide correct 2FA code" );
+        $mech->content_contains('successfully enabled two-factor authentication', "2FA activated");
+    };
+
+    subtest 'test extra parish areas' => sub {
+        $mech->get_ok('/admin/bodies/add');
+        $mech->content_contains('Bradenham');
+        $mech->content_contains('Castle Bromwich');
+        $mech->log_out_ok;
     };
 };
 
 FixMyStreet::override_config {
-    COBRAND_FEATURES => { borough_email_addresses => { fixmystreet => {
-        'graffiti@northamptonshire' => [
-            { areas => [2397], email => 'graffiti@northampton' },
-        ],
-    } } },
+    COBRAND_FEATURES => {
+        borough_email_addresses => {
+            fixmystreet => {
+                'graffiti@northamptonshire' =>
+                    [ { areas => [2397], email => 'graffiti@northampton' }, ],
+                'cleaning@somerset' => [
+                    { areas => [2428], email => 'IdvEnquiries@mendip.dev' },
+                ],
+                'other@nyorks' => [
+                    { areas => [2406], email => 'environment@richmondshire.dev' },
+                ],
+                'default@cumbria' => [
+                    { areas => [2274], email => 'street.scene@allerdale.dev' },
+                ],
+            }
+        }
+        },
     ALLOWED_COBRANDS => 'fixmystreet',
     MAPIT_URL => 'http://mapit.uk/',
 }, sub {
     subtest 'Ex-district reports are sent to correct emails' => sub {
-        my $body = $mech->create_body_ok( 2397, 'Northampton' );
-        my $contact = $mech->create_contact_ok(
-            body_id => $body->id,
-            category => 'Graffiti',
-            email => 'graffiti@northamptonshire',
-        );
+        subtest 'Northampton' => sub {
+            my $body    = $mech->create_body_ok( 2397, 'Northampton' );
+            my $contact = $mech->create_contact_ok(
+                body_id  => $body->id,
+                category => 'Graffiti',
+                email    => 'graffiti@northamptonshire',
+            );
 
-        my ($report) = $mech->create_problems_for_body(1, $body->id, 'Title', {
-            latitude => 52.236252,
-            longitude => -0.892053,
-            cobrand => 'fixmystreet',
-            category => 'Graffiti',
-        });
-        FixMyStreet::Script::Reports::send();
-        $mech->email_count_is(1);
-        my @email = $mech->get_email;
-        is $email[0]->header('To'), 'Northampton <graffiti@northampton>';
+            my ($report) = $mech->create_problems_for_body(
+                1,
+                $body->id,
+                'Title',
+                {   latitude  => 52.236252,
+                    longitude => -0.892053,
+                    cobrand   => 'fixmystreet',
+                    category  => 'Graffiti',
+                }
+            );
+            FixMyStreet::Script::Reports::send();
+            $mech->email_count_is(1);
+            my @email = $mech->get_email;
+            is $email[0]->header('To'), 'Northampton <graffiti@northampton>';
+            $mech->clear_emails_ok;
+        };
+
+        subtest 'Mendip (Somerset)' => sub {
+            my $body
+                = $mech->create_body_ok( 2428, 'Mendip District Council' );
+            my $contact = $mech->create_contact_ok(
+                body_id  => $body->id,
+                category => 'Graffiti',
+                email    => 'cleaning@somerset',
+            );
+
+            my ($report) = $mech->create_problems_for_body(
+                1,
+                $body->id,
+                'Title',
+                {   latitude  => 51.26345,
+                    longitude => -2.28191,
+                    cobrand   => 'fixmystreet',
+                    category  => 'Graffiti',
+                }
+            );
+            FixMyStreet::Script::Reports::send();
+            $mech->email_count_is(1);
+            my @email = $mech->get_email;
+            is $email[0]->header('To'),
+                '"Mendip District Council" <IdvEnquiries@mendip.dev>';
+            $mech->clear_emails_ok;
+        };
+
+        subtest 'Richmondshire (N Yorks)' => sub {
+            my $body = $mech->create_body_ok( 2406,
+                'Richmondshire District Council' );
+            my $contact = $mech->create_contact_ok(
+                body_id  => $body->id,
+                category => 'Graffiti',
+                email    => 'other@nyorks',
+            );
+
+            my ($report) = $mech->create_problems_for_body(
+                1,
+                $body->id,
+                'Title',
+                {   latitude  => 54.45012,
+                    longitude => -1.65621,
+                    cobrand   => 'fixmystreet',
+                    category  => 'Graffiti',
+                }
+            );
+            FixMyStreet::Script::Reports::send();
+            $mech->email_count_is(1);
+            my @email = $mech->get_email;
+            is $email[0]->header('To'),
+                '"Richmondshire District Council" <environment@richmondshire.dev>';
+            $mech->clear_emails_ok;
+        };
+
+        subtest 'Allerdale (Cumbria)' => sub {
+            my $body = $mech->create_body_ok( 2274,
+                'Allerdale Borough Council' );
+            my $contact = $mech->create_contact_ok(
+                body_id  => $body->id,
+                category => 'Graffiti',
+                email    => 'default@cumbria',
+            );
+
+            my ($report) = $mech->create_problems_for_body(
+                1,
+                $body->id,
+                'Title',
+                {   latitude  => 54.60102,
+                    longitude => -3.13648,
+                    cobrand   => 'fixmystreet',
+                    category  => 'Graffiti',
+                }
+            );
+            FixMyStreet::Script::Reports::send();
+            $mech->email_count_is(1);
+            my @email = $mech->get_email;
+            is $email[0]->header('To'),
+                '"Allerdale Borough Council" <street.scene@allerdale.dev>';
+            $mech->clear_emails_ok;
+        };
     };
 };
 
@@ -363,8 +496,10 @@ FixMyStreet::override_config {
     my $he = $mech->create_body_ok(2227, 'National Highways');
     $mech->create_contact_ok(body_id => $hampshire->id, category => 'Flytipping', email => 'foo@bexley');
     $mech->create_contact_ok(body_id => $hampshire->id, category => 'Trees', email => 'foo@bexley');
-    $mech->create_contact_ok(body_id => $he->id, category => 'Litter (NH)', email => 'litter@he', group => 'National Highways');
-    $mech->create_contact_ok(body_id => $he->id, category => 'Potholes (NH)', email => 'potholes@he', group => 'National Highways');
+    $mech->create_contact_ok(body_id => $hampshire->id, category => 'Messy roads', email => 'foo@bexley', extra => {litter_category_for_he => 1});
+    $mech->create_contact_ok(body_id => $he->id, category => 'Slip Roads (NH)', email => 'litter@he', group => 'Litter');
+    $mech->create_contact_ok(body_id => $he->id, category => 'Main Carriageway (NH)', email => 'litter@he', group => 'Litter');
+    $mech->create_contact_ok(body_id => $he->id, category => 'Potholes (NH)', email => 'potholes@he');
 
     subtest 'fixmystreet changes litter options for National Highways' => sub {
 
@@ -391,34 +526,41 @@ FixMyStreet::override_config {
         mock_road("M1", 0);
         $mech->get_ok("/report/new?longitude=-0.912160&latitude=51.015143");
         $mech->content_contains('Litter');
+        $mech->content_contains('Slip Roads');
+        $mech->content_contains('Main Carriageway');
         $mech->content_contains('Potholes');
-        $mech->content_contains('Trees');
-        $mech->content_contains('Flytipping');
+        $mech->content_contains("Trees'>");
+        $mech->content_contains("Flytipping'>");
 
         # A-road where NH responsible for litter, council categories will also be present
         mock_road("A5103", 1);
         $mech->get_ok("/report/new?longitude=-0.912160&latitude=51.015143");
         $mech->content_contains('Litter');
+        $mech->content_contains('Slip Roads');
+        $mech->content_contains('Main Carriageway');
         $mech->content_contains('Potholes');
-        $mech->content_contains('Trees');
-        $mech->content_contains('Flytipping');
+        $mech->content_contains("Trees'>");
+        $mech->content_contains("Flytipping'>");
 
         # A-road where NH not responsible for litter, no NH litter categories
         mock_road("A34", 0);
         $mech->get_ok("/report/new?longitude=-0.912160&latitude=51.015143");
         $mech->content_lacks('Litter');
+        $mech->content_lacks('Slip Roads');
+        $mech->content_lacks('Main Carriageway');
         $mech->content_contains('Potholes');
-        $mech->content_contains('Trees');
-        $mech->content_contains('Flytipping');
+        $mech->content_contains("Trees'>");
+        $mech->content_contains('value=\'Flytipping\' data-nh="1"');
 
         # A-road where NH not responsible for litter, referred to FMS from National Highways
-        # ajax call filters NH category to contain only litter related council subcategories
+        # ajax call filters NH category to contain only litter related council categories
         mock_road("A34", 0);
         my $j = $mech->get_ok_json("/report/new/ajax?w=1&longitude=-0.912160&latitude=51.015143&he_referral=1");
-        my $tree = HTML::TreeBuilder->new_from_content($j->{subcategories});
+        my $tree = HTML::TreeBuilder->new_from_content($j->{category});
         my @elements = $tree->find('input');
-        is @elements, 1, 'Only one subcategory in National Highways category';
-        is $elements[0]->attr('value') eq 'Flytipping', 1, 'Subcategory is Flytipping';
+        is @elements, 2, 'Two categories in National Highways category';
+        is $elements[0]->attr('value') eq 'Flytipping', 1, 'Subcategory is Flytipping - default litter category';
+        is $elements[1]->attr('value') eq 'Messy roads', 1, 'Subcategory is Messy roads - checkbox selected litter category';
     };
 
     subtest "check things redacted appropriately" => sub {
@@ -436,7 +578,7 @@ FixMyStreet::override_config {
         }, "submit details");
         $mech->content_contains('Nearly done');
 
-        my $report = FixMyStreet::DB->resultset("Problem")->search(undef, { order_by => { -desc => 'id' } })->first;
+        my $report = FixMyStreet::DB->resultset("Problem")->order_by('-id')->first;
         is $report->title, 'Test Redact report from [phone removed]';
         is $report->detail, 'Please could you email me on [email removed] or ring me on [phone removed].';
 
@@ -446,8 +588,18 @@ FixMyStreet::override_config {
 
         $report->delete;
     };
+};
 
-
+FixMyStreet::override_config {
+    ALLOWED_COBRANDS => 'fixmystreet',
+    MAPIT_URL => 'http://mapit.uk/',
+}, sub {
+    subtest 'geo-located /around is zoomed in further' => sub {
+        $mech->get_ok('/around?longitude=-2.364050&latitude=51.386269');
+        $mech->content_contains("data-zoom=2");
+        $mech->get_ok('/around?longitude=-2.364050&latitude=51.386269&geolocate=1');
+        $mech->content_contains("data-zoom=4");
+    }
 };
 
 done_testing();

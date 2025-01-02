@@ -5,7 +5,7 @@ use HTML::FormHandler::Moose;
 extends 'FixMyStreet::App::Form::Waste';
 
 has_page intro => (
-    title => 'Modify your green garden waste subscription',
+    title => 'Change your garden waste subscription',
     template => 'waste/garden/modify_pick.html',
     fields => ['task', 'apply_discount', 'continue'],
     next => 'alter',
@@ -19,7 +19,7 @@ has_page intro => (
 );
 
 has_page alter => (
-    title => 'Modify your green garden waste subscription',
+    title => 'Change your garden waste subscription',
     template => 'waste/garden/modify.html',
     fields => ['current_bins', 'bins_wanted', 'name', 'phone', 'email', 'continue_review'],
     field_ignore_list => sub {
@@ -48,7 +48,7 @@ has_page alter => (
             my $cost_pro_rata = $c->cobrand->waste_get_pro_rata_cost($new_bins, $data->{end_date});
             $c->stash->{pro_rata} = ($cost_now_admin + $cost_pro_rata) / 100;
         }
-        if ($data->{apply_discount}) {
+        if ($form->saved_data->{apply_discount}) {
             ($c->stash->{cost_pa}, $c->stash->{cost_now_admin}, $c->stash->{pro_rata}) =
             $c->cobrand->apply_garden_waste_discount(
                 $c->stash->{cost_pa},
@@ -72,7 +72,7 @@ with 'FixMyStreet::App::Form::Waste::AboutYou';
 
 has_page summary => (
     fields => ['tandc', 'submit'],
-    title => 'Modify your green garden waste subscription',
+    title => 'Change your garden waste subscription',
     template => 'waste/garden/modify_summary.html',
     update_field_list => sub {
         my $form = shift;
@@ -131,7 +131,7 @@ has_field task => (
     widget => 'RadioGroup',
     options => [
         { value => 'modify', label => 'Increase or reduce the number of bins in your subscription' },
-        { value => 'cancel', label => 'Cancel your green garden waste subscription' },
+        { value => 'cancel', label => 'Cancel your garden waste subscription' },
     ],
 );
 
@@ -165,14 +165,7 @@ has_field apply_discount => (
     option_label => 'Check box if customer is entitled to a discount',
 );
 
-has_field tandc => (
-    type => 'Checkbox',
-    required => 1,
-    label => 'Terms and conditions',
-    option_label => FixMyStreet::Template::SafeString->new(
-        'I agree to the <a href="/about/garden_terms" target="_blank">terms and conditions</a>',
-    ),
-);
+with 'FixMyStreet::App::Form::Waste::GardenTandC';
 
 has_field continue => (
     type => 'Submit',

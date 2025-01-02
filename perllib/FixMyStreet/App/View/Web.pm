@@ -5,6 +5,7 @@ use strict;
 use warnings;
 
 use Digest::MD5;
+use Lingua::EN::Inflect qw(NUMWORDS);
 use File::Basename qw(fileparse);
 use FixMyStreet;
 use FixMyStreet::Template;
@@ -27,6 +28,7 @@ __PACKAGE__->config(
     FILTERS => {
         add_links => \&add_links,
         escape_js => \&escape_js,
+        numwords => \&numwords,
         staff_html_markup => [ \&staff_html_markup_factory, 1 ],
     },
     COMPILE_EXT => '.ttc',
@@ -148,6 +150,13 @@ sub escape_js {
 my %version_hash;
 sub version {
     my ( $self, $c, $file, $url ) = @_;
+
+    if ($file eq '/js/asset_layers.js') {
+        return _version_asset($c);
+    } elsif ($file eq '/js/translation_strings.js') {
+        return _version_translation($c);
+    }
+
     $url ||= $file;
     _version_get_details($file);
     if ($version_hash{$file} && $file =~ /\.js$/) {
@@ -185,6 +194,41 @@ sub _version_get_details {
     };
 }
 
+sub _version_asset {
+    my $c = shift;
+    my $moniker = $c->cobrand->moniker;
+    my $digest = '';
+    foreach ("../templates/web/base/js/asset_layers.html", "../conf/general.yml") {
+        _version_get_details($_);
+        $digest .= $version_hash{$_}{digest};
+    }
+    my $url = "/js/asset_layers.js";
+    my ($name, $path, $suffix) = fileparse($url, qr/\.css/, qr/\.js/);
+    my $compiled = "/static$path$name.$moniker.$digest$suffix";
+    if (-e FixMyStreet->path_to('web', $compiled)) {
+        return "$compiled";
+    }
+    return "$url?$digest";
+}
+
+sub _version_translation {
+    my $c = shift;
+    my $lang = $c->stash->{lang_code};
+    my $digest = '';
+    foreach ("../templates/web/base/js/translation_strings.html", "../locale/$ENV{LANG}/LC_MESSAGES/FixMyStreet.po") {
+        _version_get_details($_);
+        $digest .= $version_hash{$_}{digest};
+        last if $lang eq 'en-gb'; # No locale file
+    }
+    my $url = "/js/translation_strings.$lang.js";
+    my ($name, $path, $suffix) = fileparse($url, qr/\.css/, qr/\.js/);
+    my $compiled = "/static$path$name.$digest$suffix";
+    if (-e FixMyStreet->path_to('web', $compiled)) {
+        return "$compiled";
+    }
+    return "$url?$digest";
+}
+
 sub decode {
     my ( $self, $c, $text ) = @_;
     utf8::decode($text) unless utf8::is_utf8($text);
@@ -196,6 +240,8 @@ sub prettify_state {
 
     return FixMyStreet::DB->resultset("State")->display($text, $single_fixed);
 }
+
+sub numwords { NUMWORDS($_[0]) }
 
 1;
 

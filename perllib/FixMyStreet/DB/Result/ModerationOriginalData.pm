@@ -10,6 +10,7 @@ use warnings;
 use base 'DBIx::Class::Core';
 __PACKAGE__->load_components(
   "FilterColumn",
+  "+FixMyStreet::DB::JSONBColumn",
   "FixMyStreet::InflateColumn::DateTime",
   "FixMyStreet::EncodedColumn",
 );
@@ -37,12 +38,11 @@ __PACKAGE__->add_columns(
   "created",
   {
     data_type     => "timestamp",
-    default_value => \"current_timestamp",
+    default_value => \"CURRENT_TIMESTAMP",
     is_nullable   => 0,
-    original      => { default_value => \"now()" },
   },
   "extra",
-  { data_type => "text", is_nullable => 1 },
+  { data_type => "jsonb", is_nullable => 1 },
   "category",
   { data_type => "text", is_nullable => 1 },
   "latitude",
@@ -70,20 +70,16 @@ __PACKAGE__->belongs_to(
 );
 
 
-# Created by DBIx::Class::Schema::Loader v0.07035 @ 2019-04-25 12:06:39
-# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:FLKiZELcfBcc9VwHU2MZYQ
+# Created by DBIx::Class::Schema::Loader v0.07035 @ 2023-05-10 17:09:58
+# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:1zpu2TDVDbOGAY6wMalZLA
 
 use Moo;
 use FixMyStreet::Template::SafeString;
 use Text::Diff;
-use Data::Dumper;
 
-with 'FixMyStreet::Roles::Extra',
-     'FixMyStreet::Roles::PhotoSet';
+with 'FixMyStreet::Roles::DB::Extra',
+     'FixMyStreet::Roles::DB::PhotoSet';
 
-
-__PACKAGE__->load_components("+FixMyStreet::DB::RABXColumn");
-__PACKAGE__->rabx_column('extra');
 
 # Comments use 'text' rather than 'detail'
 sub text { shift->detail }
@@ -170,12 +166,16 @@ sub compare_photo {
 # the comparison with the problem's extra will be wrong.
 my @keys_to_ignore = (
     'sent_to', # SendReport::Email adds this arrayref when sent
+    'whensent_previous', # Previous whensent data is stored here
     'closed_updates', # Marked to close a report to updates
     'closure_alert_sent_at', # Set by alert sending if update closes a report
+    'confirm_reference', # Added for Bucks switch from Confirm to Alloy
     # Can be set/changed by an Open311 update
     'external_status_code', 'customer_reference',
     # Can be set by inspectors
     'traffic_information', 'detailed_information', 'duplicates', 'duplicate_of', 'order',
+    # WasteWorks
+    'location_photo',
 );
 my %keys_to_ignore = map { $_ => 1 } @keys_to_ignore;
 
@@ -187,6 +187,7 @@ sub compare_extra {
 
     my $both = { %$old, %$new };
     my @all_keys = grep { !$keys_to_ignore{$_} } sort keys %$both;
+    @all_keys = grep { !/^item_photo_/ } @all_keys;
     my @s;
     foreach (@all_keys) {
         $old->{$_} = join(', ', @{$old->{$_}}) if ref $old->{$_} eq 'ARRAY';
@@ -199,7 +200,30 @@ sub compare_extra {
             push @s, string_diff("$_ = $old->{$_}", "");
         }
     }
-    return join '; ', grep { $_ } @s;
+
+    # Added for bulky waste collection amendments, good to show everywhere? XXX
+    $old = $self->get_extra_fields;
+    my %old = map { $_->{name} => 1 } @$old;
+    $new = $other->get_extra_fields;
+    foreach (@$old) {
+        my $o = $other->get_extra_field_value($_->{name});
+        if ($_->{value} && $o) {
+            my $diff = string_diff($_->{value}, $o, single => 1);
+            push @s, "$_->{name} = $diff" if $diff;
+        } elsif ($_->{value}) {
+            push @s, "$_->{name} = " . string_diff($_->{value}, "");
+        } elsif ($o) {
+            push @s, "$_->{name} = " . string_diff("", $o);
+        }
+    }
+    foreach (grep { !$old{$_->{name}} } @$new) {
+        my $o = $self->get_extra_field_value($_->{name});
+        if (!$o) {
+            push @s, "$_->{name} = " . string_diff("", $_->{value});
+        }
+    }
+
+    return FixMyStreet::Template::SafeString->new(join '<br>', grep { $_ } @s);
 }
 
 sub extra_diff {

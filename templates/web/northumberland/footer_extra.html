@@ -18,7 +18,7 @@
             <div class="footer-main--links col-n2">
                 <h3>Menu</h3>
                 <a href="https://www.northumberland.gov.uk/About/Contact/contacts.aspx#contactus">Contact Us</a>
-                <a href="https://www.northumberland.gov.uk/About/Contact/Information.aspx#privacynotices" rel="nofollow">Privacy Policy</a>
+                <a href="[% c.cobrand.privacy_policy_url %]" rel="nofollow">Privacy Policy</a>
                 <a href="https://www.northumberland.gov.uk/About/Accessibility.aspx" rel="nofollow">Accessibility</a>
                 <a href="https://www.northumberland.gov.uk/About/Staff.aspx" rel="nofollow">Staff Resources</a>
                 <a href="https://www.northumberland.gov.uk/Councillors/Info.aspx" rel="nofollow">Councillor Resources</a>
@@ -37,12 +37,5 @@
         </div>
     </div>
 </footer>
-
-<div class="societyworks-footer">
-    <div class="container">
-        <p>
-            Powered by
-            <a class="societyworks-footer__logo societyworks-footer__logo--fms-pro" href="https://www.societyworks.org/services/highways/">FixMyStreet Pro</a>
-        </p>
-    </div>
-</div>
+[% PROCESS '_footer_main_nav.html' %]
+[% PROCESS '_footer_extra_powered_by.html' %]

@@ -2,24 +2,12 @@
     SET html_att = ' lang="' _ lang_code _ '"';
     # For a right-to-left language, use the following line in your own header:
     # SET html_att = html_att _ ' dir="rtl"';
-
-    USE date;
 -%]
 <!doctype html>
 <!--[if IE 9]>   <html class="no-js ie9"[% html_att | safe %]><![endif]-->
 <!--[if gt IE 9]><!--><html class="no-js"[% html_att | safe %]><!--<![endif]-->
     <head>
-        <meta name="viewport" content="initial-scale=1.0, width=device-width">
-
-        <meta http-equiv="X-UA-Compatible" content="IE=Edge,chrome=1">
-        <meta name="HandHeldFriendly" content="true">
-        <meta name="mobileoptimized" content="0">
-
-        [% INCLUDE 'header_opengraph.html' %]
-        [% INCLUDE 'header/css.html' %]
         [% INCLUDE 'common_header_tags.html' %]
-        [% TRY %][% PROCESS 'header_extra.html' %][% CATCH file %][% END %]
-
     </head>
     [% TRY %][% PROCESS 'set_body_class.html' %][% CATCH file %][% END %]
     <body class="[% bodyclass | html IF bodyclass %]">
@@ -88,9 +76,6 @@
 
                 <div class="content[% " $mainclass" | html IF mainclass %]" role="main">
                 [% IF NOT admin %]
-                  [% IF bodyclass.match('frontpage') AND date.format(format = '%Y%m%d') < 20210712 AND date.format(format = '%Y%m%d') >= 20210531 %]
-                    [% INCLUDE 'bikeable_banner.html' %]
-                  [% END %]
                   [% INCLUDE 'nav_over_content.html' %]
                 [% END %]
 

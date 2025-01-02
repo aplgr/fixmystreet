@@ -1,7 +1,6 @@
 package FixMyStreet::Script::Reports;
 
 use Moo;
-use CronFns;
 use FixMyStreet;
 use FixMyStreet::DB;
 use FixMyStreet::Queue::Item::Report;
@@ -13,7 +12,8 @@ has unconfirmed_data => ( is => 'ro', default => sub { {} } );
 # Static method, used by send-reports cron script and tests.
 # Creates a manager object from provided data and processes it.
 sub send {
-    my ($verbose, $nomail, $debug) = @_;
+    my ($verbose, $nomail, $debug, $id) = @_;
+    $debug = 1 if $id;
 
     my $manager = __PACKAGE__->new(
         verbose => $verbose,
@@ -22,34 +22,36 @@ sub send {
     my $params = construct_query($debug);
     my $db = FixMyStreet::DB->schema->storage;
 
-    $db->txn_do(sub {
-        my $unsent = FixMyStreet::DB->resultset('Problem')->search($params, {
-            for => \'UPDATE SKIP LOCKED',
+    my $unsent = FixMyStreet::DB->resultset('Problem')->search($params);
+
+    $manager->log("starting to loop through unsent problem reports...");
+    my $unsent_count = 0;
+    while (my $row = $unsent->next) {
+        next if $id && $row->id != $id;
+        $row = $db->txn_do(sub {
+            my $p = FixMyStreet::DB->resultset('Problem')->search({ id => $row->id }, { for => \'UPDATE SKIP LOCKED' })->single;
+            $p->update({ send_state => 'processing' }) if $p && $p->send_state eq 'unprocessed';
+        }) or next;
+        $unsent_count++;
+        my $item = FixMyStreet::Queue::Item::Report->new(
+            report => $row,
+            manager => $manager,
+            verbose => $verbose,
+            nomail => $nomail,
+        );
+        $item->process;
+        $db->txn_do(sub {
+            my $p = FixMyStreet::DB->resultset('Problem')->search({ id => $row->id }, { for => \'UPDATE' } )->single;
+            $p->update({ send_state => 'unprocessed' }) if $p && $p->send_state eq 'processing';
         });
+    }
 
-        $manager->log("starting to loop through unsent problem reports...");
-        my $unsent_count = 0;
-        while (my $row = $unsent->next) {
-            $unsent_count++;
-            my $item = FixMyStreet::Queue::Item::Report->new(
-                report => $row,
-                manager => $manager,
-                verbose => $verbose,
-                nomail => $nomail,
-            );
-            $item->process;
-        }
-
-        $manager->end_line($unsent_count);
-        $manager->end_summary_unconfirmed;
-    });
+    $manager->end_line($unsent_count);
+    $manager->end_summary_unconfirmed;
 }
 
 sub construct_query {
     my ($debug) = @_;
-    my $site = CronFns::site(FixMyStreet->config('BASE_URL'));
-    my $states = [ FixMyStreet::DB::Result::Problem::open_states() ];
-    $states = [ 'submitted', 'confirmed', 'in progress', 'feedback pending', 'external', 'wish' ] if $site eq 'zurich';
 
     # Devolved Noop categories (unlikely to be any, but still)
     my @noop_params;
@@ -66,21 +68,12 @@ sub construct_query {
     # Noop bodies
     my @noop_bodies = FixMyStreet::DB->resultset('Body')->search({ send_method => 'Noop' })->all;
     @noop_bodies = map { $_->id } @noop_bodies;
-    push @noop_params, \[ "NOT regexp_split_to_array(bodies_str, ',') && ?", [ {} => \@noop_bodies ] ];
-
-    my @and = (
-        @noop_params,
-        {   -or => {
-                whensent       => undef,
-                send_fail_body_ids => { '!=', '{}' },
-            }
-        },
-    );
+    push @noop_params, \[ "NOT regexp_split_to_array(bodies_str, ',') && ?", [ {} => \@noop_bodies ] ] if @noop_bodies;
 
     my $params = {
-        state => $states,
-        bodies_str => { '!=', undef },
-        -and => \@and,
+        state => { -not_in => [ FixMyStreet::DB::Result::Problem::hidden_states ] },
+        send_state => 'unprocessed',
+        @noop_params ? (-and => \@noop_params) : (),
     };
     if (!$debug) {
         $params->{'-or'} = [
@@ -100,7 +93,7 @@ sub end_line {
     if ($unsent_count) {
         $self->log("processed all unsent reports (total: $unsent_count)");
     } else {
-        $self->log("no unsent reports were found (must have whensent=null and suitable bodies_str & state) -- nothing to send");
+        $self->log("no unsent reports were found (must have send_state=unprocessed) -- nothing to send");
     }
 }
 
@@ -123,17 +116,11 @@ sub end_summary_failures {
 
     my $sending_errors = '';
     my $unsent = FixMyStreet::DB->resultset('Problem')->search( {
+        send_state => 'unprocessed',
         state => [ FixMyStreet::DB::Result::Problem::open_states() ],
-        -or => {
-            whensent           => undef,
-            send_fail_body_ids => { '!=', '{}' },
-        },
         bodies_str => { '!=', undef },
         send_fail_count => { '>', 0 }
-    },
-    {
-        order_by => { -desc => 'confirmed' }
-    });
+    })->order_by('-confirmed');
     my %bodies;
     while (my $row = $unsent->next) {
         my $base_url = FixMyStreet->config('BASE_URL');

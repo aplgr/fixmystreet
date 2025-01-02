@@ -15,6 +15,7 @@ use base 'FixMyStreet::Cobrand::Whitelabel';
 
 use strict;
 use warnings;
+use utf8;
 
 use URI;
 
@@ -24,7 +25,7 @@ use URI;
 
 =cut
 
-sub council_area_id { return 2504; }
+sub council_area_id { return [2504, 2505] } # 2505 Camden
 sub council_area { return 'Westminster'; }
 sub council_name { return 'Westminster City Council'; }
 sub council_url { return 'Westminster'; }
@@ -57,6 +58,18 @@ sub allow_anonymous_reports { 'button' }
 
 sub get_geocoder {
     return 'OSM'; # default of Bing gives poor results, let's try overriding.
+}
+
+=item * Uses custom text for the title field for new reports.
+
+=cut
+
+sub new_report_title_field_hint {
+    "e.g. ‘Rubbish dumped on Example St, next to post box’"
+}
+
+sub new_report_detail_field_hint {
+    "e.g. ‘Six large bags of rubbish, including shoes and clothes…’"
 }
 
 =item * /around map shows only open reports by default.
@@ -127,15 +140,15 @@ sub oidc_user_extra {
 }
 
 sub open311_config {
-    my ($self, $row, $h, $params) = @_;
+    my ($self, $row, $h, $params, $contact) = @_;
 
     my $id = $row->user->get_extra_metadata('westminster_account_id');
     # Westminster require 0 as the account ID if there's no MyWestminster ID.
     $h->{account_id} = $id || '0';
 }
 
-sub open311_extra_data_include {
-    my ($self, $row, $h) = @_;
+sub open311_update_missing_data {
+    my ($self, $row, $h, $contact) = @_;
 
     # Reports made via the app probably won't have a USRN because we don't
     # display the road layer. Instead we'll look up the closest asset from the
@@ -155,8 +168,6 @@ sub open311_extra_data_include {
             $row->update_extra_field({ name => 'UPRN', value => $ref });
         }
     }
-
-    return undef;
 }
 
 sub lookup_site_code_config {
@@ -198,20 +209,17 @@ sub _fetch_features_url {
 
 sub categories_restriction {
     my ($self, $rs) = @_;
-    # Westminster don't want TfL or email categories on their cobrand.
-    # Categories covering the council area have a mixture of Open311 and Email
+    # Westminster don't want email categories on their cobrand.
+    # Categories covering the body have a mixture of Open311 and Email
     # send methods. We've set up the Email categories with a devolved
     # send_method, so can identify Open311 categories as those which have a
-    # blank send_method.
-    # XXX This still shows "These will be sent to TfL or Westminster City Council"
-    # on /report/new before a category is selected...
+    # blank send_method; the TfL categories also all have a blank send method.
     return $rs->search( {
-            'body.name' => 'Westminster City Council',
             -or => [
                 'me.send_method' => undef, # Open311 categories
                 'me.send_method' => '', # Open311 categories that have been edited in the admin
             ]
-        }, { join => 'body' });
+        });
 }
 
 sub updates_restriction {
@@ -221,6 +229,24 @@ sub updates_restriction {
     return $self->next::method(@_)->search({
         "me.cobrand" => { '!=', 'fixmystreet' }
     });
+}
+
+=head2 munge_overlapping_asset_bodies
+
+Alters the list of available bodies for the location, depending on calculated
+responsibility. Here, we needt to make sure we get rid of Camden in the usual
+in-Westminster sense.
+
+=cut
+
+sub munge_overlapping_asset_bodies {
+    my ($self, $bodies) = @_;
+
+    my %bodies = map { $_->get_column('name') => 1 } values %$bodies;
+    if ( $bodies{'Camden Borough Council'} ) {
+        my $camden = FixMyStreet::Cobrand::Camden->new({ c => $self->{c} });
+        $camden->munge_overlapping_asset_bodies($bodies);
+    }
 }
 
 1;

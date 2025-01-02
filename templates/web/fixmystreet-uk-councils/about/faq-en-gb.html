@@ -1,6 +1,4 @@
-[% INCLUDE 'header.html', title = loc('Frequently Asked Questions'), bodyclass = 'twothirdswidthpage' %]
-
-[% INCLUDE 'about/_sidebar.html' %]
+[% INCLUDE 'header.html', title = loc('Frequently Asked Questions'), sidebar='about/_sidebar.html' %]
 
 <h1>Frequently Asked Questions</h1>
 
@@ -167,6 +165,14 @@ cleaning</strong> or <strong>clearing</strong>.
 </p>
 </dd>
 
+<dt>Is there an app I can download?</dt>
+<dd>
+<p>
+    Yes, see our <a href="/about/web-app">instructions on how to download the
+        [% c.cobrand.council_name %] reporting app</a>.
+</p>
+</dd>
+
 <dt>Why do you publish reports online?</dt>
 
 <dd>
@@ -253,4 +259,4 @@ cleaning</strong> or <strong>clearing</strong>.
 
 </dl>
 
-[% INCLUDE 'footer.html' pagefooter = 'yes' %]
+[% INCLUDE 'footer.html' %]

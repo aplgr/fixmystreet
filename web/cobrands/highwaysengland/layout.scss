@@ -39,45 +39,38 @@
             background-color: transparent;
         }
     }
-
-    span.report-a-problem-btn,
-    span.report-a-problem-btn:hover {
-        color: $nav_colour;
-    }
 }
 
 div.form-error,
 p.form-error {
-    @include flex-container();
+    display: flex;
 }
 
 #front-main {
-    background: $color-he-grey-2;
-    color: inherit;
     padding: 0 0 2% 0;
 
-    #postcodeForm {
-        overflow: visible;
-
-        div {
-            margin: 0;
-            width: 100%;
-            max-width: 30em;
-
-            input#sub {
-                padding: 0.5em 1.5em;
-            }
-        }
+    #front-main-container {
+        padding: 0;
     }
 
     h1 {
         font-size: 3em;
         font-weight: bold;
-        color: $white;
     }
 
     .hero-bg {
         padding: 5% 1em;
+    }
+}
+
+.postcode-form-box {
+    div {
+        width: 100%;
+        max-width: 30em;
+    }
+
+    input#sub {
+        padding: 0.5em 1.5em;
     }
 }
 
@@ -87,14 +80,8 @@ p.form-error {
     margin-top: 2em;
 }
 
-// NH want the inspector form to be a bit wider
+// NH want the inspector form to be wider
 .with-actions {
-    #map_box {
-        left: 60em;
-    }
-    #map_sidebar {
-        width: 60em;
-    }
     #side-inspect {
         width: 100%;
         input[type=text], input[type=password], input[type=email], textarea {

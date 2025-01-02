@@ -112,10 +112,9 @@ sub open311_extra_data_include {
         { name => 'external_id', value => $row->id },
     ];
 
-    if ($row->geocode) {
-        my $address = $row->geocode->{resourceSets}->[0]->{resources}->[0]->{address};
+    if (my $address = $row->nearest_address) {
         push @$open311_only, (
-            { name => 'closest_address', value => $address->{formattedAddress} }
+            { name => 'closest_address', value => $address }
         );
         $h->{closest_address} = '';
     }

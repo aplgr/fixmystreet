@@ -9,11 +9,11 @@ use Math::Trig qw(great_circle_distance deg2rad);
 
 use FixMyStreet::Gaze;
 use FixMyStreet::MapIt;
-use RABX;
 
 use FixMyStreet::Cobrand;
 use FixMyStreet::DB;
 use FixMyStreet::Email;
+use FixMyStreet::Geocode::Address;
 use FixMyStreet::Map;
 use FixMyStreet::App::Model::PhotoSet;
 
@@ -53,9 +53,9 @@ sub send_alert_type {
                $item_table.confirmed as item_confirmed,
                $item_table.photo as item_photo,
                $item_table.problem_state as item_problem_state,
-               $item_table.cobrand as item_cobrand,
                $item_table.extra as item_extra,
                $item_table.private_email_text as item_private_email_text,
+               $head_table.cobrand as item_cobrand,
                $head_table.*
         from alert, $item_table, $head_table
             where alert.parameter::integer = $head_table.id
@@ -102,7 +102,7 @@ sub send_alert_type {
 
         next unless FixMyStreet::DB::Result::Problem::visible_states()->{$row->{state}};
 
-        next if $row->{alert_cobrand} ne 'tfl' && $row->{item_cobrand} eq 'tfl';
+        next if alert_check_cobrand($row->{alert_cobrand}, $row->{item_cobrand});
 
         $schema->resultset('AlertSent')->create( {
             alert_id  => $row->{alert_id},
@@ -126,12 +126,20 @@ sub send_alert_type {
             # this might throw up the odd false positive but only in cases where the
             # state has changed and there was already update text
             if ($row->{item_problem_state} && $last_problem_state ne $row->{item_problem_state}) {
-                my $cobrand_name = $report->cobrand_name_for_state($cobrand);
-                my $state = FixMyStreet::DB->resultset("State")->display($row->{item_problem_state}, 1, $cobrand_name);
+                my $update = '';
+                unless ( $cobrand->call_hook( skip_alert_state_changed_to => $report ) ) {
+                    my $cobrand_name = $report->cobrand_name_for_state($cobrand);
+                    my $state = FixMyStreet::DB->resultset("State")->display($row->{item_problem_state}, 1, $cobrand_name);
 
-                my $update = _('State changed to:') . ' ' . $state;
+                    $update = _('State changed to:') . ' ' . $state;
+                }
+
+                $row->{item_text_original} = $row->{item_text};
                 $row->{item_text} = $row->{item_text} ? $row->{item_text} . "\n\n" . $update :
                                                         $update;
+                if ($row->{item_private_email_text} && $report->cobrand_data ne 'waste') {
+                    $row->{item_private_email_text} = $row->{item_private_email_text} . "\n\n" . $update;
+                }
                 $last_problem_state = $row->{item_problem_state};
             }
             next unless $row->{item_text};
@@ -228,9 +236,13 @@ sub _extra_new_update_data {
     $row->{confirmed} = $dt;
 
     # Hack in the image for the non-object updates
+    my $photo = $row->{item_photo};
+    my $id = $row->{item_id};
     $row->{get_first_image_fp} = sub {
         return FixMyStreet::App::Model::PhotoSet->new({
-            db_data => $row->{item_photo},
+            object_id => $id,
+            object_type => 'comment',
+            db_data => $photo,
         })->get_image_data( num => 0, size => 'fp' );
     };
 }
@@ -238,8 +250,8 @@ sub _extra_new_update_data {
 sub _extra_new_area_data {
     my ($row, $ref) = @_;
 
-    if ( exists $row->{geocode} && $row->{geocode} && $ref =~ /ward|council/ ) {
-        my $nearest_st = _get_address_from_geocode( $row->{geocode} );
+    if ( $ref =~ /ward|council/ ) {
+        my $nearest_st = FixMyStreet::Geocode::Address->new($row->{geocode})->for_alert;
         $row->{nearest} = $nearest_st;
     }
 
@@ -248,9 +260,13 @@ sub _extra_new_area_data {
     $row->{confirmed} = $dt;
 
     # Hack in the image for the non-object reports
+    my $photo = $row->{photo};
+    my $id = $row->{id};
     $row->{get_first_image_fp} = sub {
         return FixMyStreet::App::Model::PhotoSet->new({
-            db_data => $row->{photo},
+            object_id => $id,
+            object_type => 'problem',
+            db_data => $photo,
         })->get_image_data( num => 0, size => 'fp' );
     };
 }
@@ -279,13 +295,15 @@ sub send_local {
         FixMyStreet->set_time_zone($dt);
         $row->{confirmed} = $dt;
         $row->{confirmed_str} = $dt->strftime('%Y-%m-%d %H:%M:%S');
-        if ( exists $row->{geocode} && $row->{geocode} ) {
-            my $nearest_st = _get_address_from_geocode( $row->{geocode} );
-            $row->{nearest} = $nearest_st;
-        }
+        my $nearest_st = FixMyStreet::Geocode::Address->new($row->{geocode})->for_alert;
+        $row->{nearest} = $nearest_st;
+        my $photo = $row->{photo};
+        my $id = $row->{id};
         $row->{get_first_image_fp} = sub {
             return FixMyStreet::App::Model::PhotoSet->new({
-                db_data => $row->{photo},
+                object_id => $id,
+                object_type => 'problem',
+                db_data => $photo,
             })->get_image_data( num => 0, size => 'fp' );
         };
         push @reports, $row;
@@ -308,8 +326,8 @@ sub send_local {
         my $latitude  = $alert->parameter2;
         my $lon_rad = deg2rad($longitude);
         my $lat_rad = deg2rad(90 - $latitude);
-        my $d = $alert->parameter3;
-        $d ||= FixMyStreet::Gaze::get_radius_containing_population($latitude, $longitude);
+        my $distance = $alert->parameter3;
+        $distance ||= FixMyStreet::Gaze::get_radius_containing_population($latitude, $longitude);
         my %data = (
             template => $alert_type->template,
             data => [],
@@ -322,14 +340,14 @@ sub send_local {
         );
 
         foreach my $row (@reports) {
-            # Ignore TfL reports if the alert wasn't set up on TfL
-            next if $alert->cobrand ne 'tfl' && $row->{cobrand} eq 'tfl';
+            next if alert_check_cobrand($alert->cobrand, $row->{cobrand});
+
             # Ignore alerts created after the report was confirmed
             next if $whensubscribed gt $row->{confirmed_str};
             # Ignore alerts on reports by the same user
             next if $alert->user_id == $row->{user_id};
             # Ignore reports too far away
-            next if great_circle_distance($row->{lon_rad}, $row->{lat_rad}, $lon_rad, $lat_rad, 6372.8) > $d;
+            next if great_circle_distance($row->{lon_rad}, $row->{lat_rad}, $lon_rad, $lat_rad, 6372.8) > $distance;
             # Ignore reports already alerted on
             next if $schema->resultset('AlertSent')->search({ alert_id => $alert->id, parameter => $row->{id} })->count;
 
@@ -388,7 +406,7 @@ sub _send_aggregated_alert(%) {
     if (@template_data) {
         my %template_data = %data;
         $template_data{data} = [@template_data];
-        $template_data{template} = 'templated_email_alert-update';
+        $template_data{private_email} = 1;
         trigger_alert_sending($alert_by, $token, %template_data);
     };
 
@@ -453,23 +471,12 @@ sub _send_aggregated_alert_phone {
     return $result;
 }
 
-sub _get_address_from_geocode {
-    my $geocode = shift;
-
-    return '' unless defined $geocode;
-    my $h = new IO::String($geocode);
-    my $data = RABX::wire_rd($h);
-
-    my $str = '';
-
-    my $address = $data->{resourceSets}[0]{resources}[0]{address};
-    my @address;
-    push @address, $address->{addressLine} if $address->{addressLine} && $address->{addressLine} ne 'Street';
-    push @address, $address->{locality} if $address->{locality};
-    $str .= sprintf(_("Nearest road to the pin placed on the map (automatically generated by Bing Maps): %s\n\n"),
-        join( ', ', @address ) ) if @address;
-
-    return $str;
+# Ignore TfL reports if the alert wasn't set up on TfL, and similar
+sub alert_check_cobrand {
+    my ($alert_cobrand, $item_cobrand) = @_;
+    return 1 if $alert_cobrand ne 'tfl' && $item_cobrand eq 'tfl';
+    return 1 if $alert_cobrand eq 'cyclinguk' && $item_cobrand ne 'cyclinguk';
+    return 0;
 }
 
 1;

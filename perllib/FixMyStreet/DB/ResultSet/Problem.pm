@@ -1,5 +1,5 @@
 package FixMyStreet::DB::ResultSet::Problem;
-use base 'DBIx::Class::ResultSet';
+use base 'FixMyStreet::DB::ResultSet';
 
 use strict;
 use warnings;
@@ -9,7 +9,7 @@ use mySociety::Locale;
 use FixMyStreet::DB;
 
 use Moo;
-with 'FixMyStreet::Roles::FullTextSearch';
+with 'FixMyStreet::Roles::DB::FullTextSearch';
 __PACKAGE__->load_components('Helper::ResultSet::Me');
 sub text_search_columns { qw(id external_id bodies_str name title detail) }
 sub text_search_nulls { qw(external_id bodies_str) }
@@ -43,15 +43,19 @@ sub non_public_if_possible {
         } elsif ($c->user->has_body_permission_to('report_inspect') ||
                  $c->user->has_body_permission_to('report_mark_private')) {
             if ($only_non_public) {
-                $params->{'-and'} = [
-                    "$table.non_public" => 1,
-                    $rs->body_query($c->user->from_body->id),
-                ];
+                push @{ $params->{-and} }, {
+                    -and => [
+                        "$table.non_public" => 1,
+                        $rs->body_query($c->user->from_body->id),
+                    ]
+                };
             } else {
-                $params->{'-or'} = [
-                    "$table.non_public" => 0,
-                    $rs->body_query($c->user->from_body->id),
-                ];
+                push @{ $params->{-and} }, {
+                    -or => [
+                        "$table.non_public" => 0,
+                        $rs->body_query( $c->user->from_body->id ),
+                    ]
+                };
             }
         } else {
             $params->{"$table.non_public"} = 0;
@@ -76,7 +80,10 @@ sub to_body {
 # Front page statistics
 
 sub _cache_timeout {
-    FixMyStreet->config('CACHE_TIMEOUT') // 3600;
+    my $timeout = FixMyStreet->config('CACHE_TIMEOUT') // 3600;
+    # Spread it out a bit
+    $timeout = $timeout * (0.75 + rand()/2);
+    return $timeout;
 }
 
 sub recent_completed {
@@ -95,63 +102,59 @@ sub recent_fixed {
 sub _recent_in_states {
     my ($rs, $state_key, $states) = @_;
     my $key = "recent_$state_key:$site_key";
-    my $result = Memcached::get($key);
-    unless ($result) {
-        $result = $rs->search( {
+    return Memcached::get_or_calculate($key, _cache_timeout(), sub {
+        return $rs->search( {
             state => $states,
             lastupdate => { '>', \"current_timestamp-'1 month'::interval" },
         } )->count;
-        Memcached::set($key, $result, _cache_timeout());
-    }
-    return $result;
+    });
 }
 
 sub number_comments {
     my $rs = shift;
     my $key = "number_comments:$site_key";
-    my $result = Memcached::get($key);
-    unless ($result) {
-        $result = $rs->search(
+    return Memcached::get_or_calculate($key, _cache_timeout(), sub {
+        return $rs->search(
             { 'comments.state' => 'confirmed' },
             { join => 'comments' }
         )->count;
-        Memcached::set($key, $result, _cache_timeout());
-    }
-    return $result;
+    });
 }
 
 sub recent_new {
     my ( $rs, $interval ) = @_;
     (my $key = $interval) =~ s/\s+//g;
     $key = "recent_new:$site_key:$key";
-    my $result = Memcached::get($key);
-    unless ($result) {
-        $result = $rs->search( {
+    return Memcached::get_or_calculate($key, _cache_timeout(), sub {
+        return $rs->search( {
             state => [ FixMyStreet::DB::Result::Problem->visible_states() ],
             confirmed => { '>', \"current_timestamp-'$interval'::interval" },
         } )->count;
-        Memcached::set($key, $result, _cache_timeout());
-    }
-    return $result;
+    });
 }
 
 # Front page recent lists
 
 sub recent {
     my ( $rs ) = @_;
-    return _recent( $rs, 5 );
+    return _recent($rs, { num => 5 });
 }
 
 sub recent_photos {
-    my ( $rs, $num, $lat, $lon, $dist ) = @_;
-    return _recent( $rs, $num, $lat, $lon, $dist, 1);
+    my ( $rs, $params ) = @_;
+    return _recent($rs, { %$params, photos => 1 });
 }
 
 sub _recent {
-    my ( $rs, $num, $lat, $lon, $dist, $photos ) = @_;
+    my ( $rs, $params ) = @_;
 
-    my $key = $photos ? 'recent_photos' : 'recent';
-    $key .= ":$site_key:$num";
+    my $key = $params->{photos} ? 'recent_photos' : 'recent';
+    $key .= ":$params->{extra_key}" if $params->{extra_key};
+    $key .= ":$site_key:$params->{num}";
+
+    if ($params->{bodies}) {
+        $rs = $rs->to_body($params->{bodies});
+    }
 
     # submitted might be returned for e.g. Zurich, but would mean in moderation, so no photo
     my @states = grep { $_ ne 'submitted' } FixMyStreet::DB::Result::Problem->visible_states();
@@ -159,19 +162,19 @@ sub _recent {
         non_public => 0,
         state      => \@states,
     };
-    $query->{photo} = { '!=', undef } if $photos;
+    $query->{photo} = { '!=', undef } if $params->{photos};
 
     my $attrs = {
         # We order by most recently _created_, not confirmed, as the latter
         # is too slow on installations with millions of reports.
         # The correct ordering is applied by the `sort` lines below.
         order_by => { -desc => 'id' },
-        rows => $num,
+        rows => $params->{num},
     };
 
     my $probs;
-    if (defined $lat) { # No caching
-        $attrs->{bind} = [ $lat, $lon, $dist ];
+    if (defined $params->{point}->[0]) { # No caching
+        $attrs->{bind} = $params->{point};
         $attrs->{join} = 'nearby';
         $probs = [ mySociety::Locale::in_gb_locale {
             sort { _cmp_reports($b, $a) } $rs->search( $query, $attrs )->all;
@@ -234,8 +237,18 @@ sub around_map {
             longitude => { '>=', $p{min_lon}, '<', $p{max_lon} },
     };
 
-    $q->{$c->stash->{report_age_field}} = { '>=', \"current_timestamp-'$p{report_age}'::interval" } if
-        $p{report_age};
+    my $report_age = $p{report_age};
+    if ( $report_age && ref $report_age eq 'HASH' ) {
+        push @{ $q->{-and} }, __PACKAGE__->report_age_subquery(
+            state_table      => 'me',
+            report_age       => $report_age,
+            report_age_field => $c->stash->{report_age_field},
+        );
+    } elsif ($report_age) {
+        $q->{ $c->stash->{report_age_field} }
+            = { '>=', \"current_timestamp-'$report_age'::interval" };
+    }
+
     $q->{'me.category'} = $p{categories} if $p{categories} && @{$p{categories}};
 
     $rs->non_public_if_possible($q, $c);
@@ -247,6 +260,53 @@ sub around_map {
         $rs->search( $q, $attr )->include_comment_counts->page($p{page});
     };
     return $problems;
+}
+
+sub report_age_subquery {
+    my ( $self, %args ) = @_;
+
+    my @possible_states = (qw/open closed fixed/);
+    my $default_time = FixMyStreet::Cobrand::Default->report_age;
+    my $sub_q = [];
+
+    for my $state ( @possible_states ) {
+        # Call relevant function to get substates
+        my $call = "${state}_states";
+        my @substates = FixMyStreet::DB::Result::Problem->$call;
+
+        my $time = $args{report_age}{$state} // $default_time;
+        my %time_q;
+        if (ref $time eq 'HASH') {
+            # Gloucestershire have special settings for Confirm jobs
+            for my $type ( qw/job enquiry/ ) {
+                my %type_q;
+                if ( $type eq 'job' ) {
+                    %type_q = ( "$args{state_table}.external_id" => { '-like' => 'JOB_%' } );
+                } else {
+                    %type_q = (
+                        "$args{state_table}.external_id" => [
+                            { '=', undef },
+                            { '-not_like' => 'JOB_%' },
+                        ],
+                    );
+                }
+
+                my $time_str = $time->{$type} // $default_time;
+                push @$sub_q, {
+                    "$args{state_table}.state" => { '-in' => \@substates },
+                    $args{report_age_field}    => { '>=' => \"current_timestamp-'$time_str'::interval" },
+                    %type_q,
+                };
+            }
+        } else {
+            push @$sub_q, {
+                "$args{state_table}.state" => { '-in' => \@substates },
+                $args{report_age_field}    => { '>=' => \"current_timestamp-'$time'::interval" },
+            };
+        }
+    }
+
+    return { -or => $sub_q };
 }
 
 # Admin functions

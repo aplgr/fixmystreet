@@ -1,6 +1,9 @@
 use strict;
 use warnings;
 
+use FixMyStreet;
+BEGIN { FixMyStreet->test_mode(1); }
+
 package FixMyStreet::Cobrand::Tester;
 
 use parent 'FixMyStreet::Cobrand::FixMyStreet';
@@ -87,6 +90,7 @@ FixMyStreet::override_config {
         is_deeply $contact->get_extra_fields, $contact_extra_fields, 'new string field was added';
 
         note 'attempt to add code with spaces';
+        $mech->get_ok("/admin/body/" . $body->id . "/" . $contact->category);
         $mech->submit_form_ok( { with_fields => {
             "metadata[9999].code" => "space test",
 

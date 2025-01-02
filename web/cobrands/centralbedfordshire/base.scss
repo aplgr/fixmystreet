@@ -95,10 +95,6 @@ html .nav-menu a.report-a-problem-btn { // overloaded selector to beat _layout.s
 }
 
 #front-main {
-    background-color: $central-beds-cream;
-    margin: 0;
-    padding: 1em;
-
     h1 {
         font-weight: bold;
     }
@@ -121,6 +117,13 @@ html.js .form-section-preview {
 
 .big-green-banner {
     text-transform: none;
+}
+
+// Tree category has green assets
+#category_meta_message_HousingCommunalTrees, #category_meta_message_Trees {
+    .asset-spot:before {
+        background-color: #55BB00;
+    }
 }
 
 @import "../fixmystreet-uk-councils/societyworks-footer";

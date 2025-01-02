@@ -10,6 +10,7 @@ use warnings;
 use base 'DBIx::Class::Core';
 __PACKAGE__->load_components(
   "FilterColumn",
+  "+FixMyStreet::DB::JSONBColumn",
   "FixMyStreet::InflateColumn::DateTime",
   "FixMyStreet::EncodedColumn",
 );
@@ -25,27 +26,43 @@ __PACKAGE__->add_columns(
 __PACKAGE__->set_primary_key("id");
 
 
-# Created by DBIx::Class::Schema::Loader v0.07035 @ 2019-04-25 12:06:39
-# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:HoYrCwULpxJVJ1m9ASMk3A
+# Created by DBIx::Class::Schema::Loader v0.07035 @ 2020-10-14 22:49:08
+# DO NOT MODIFY THIS OR ANYTHING ABOVE! md5sum:2xkfKJVR+NPQhHqMai/MXQ
 
 use Storable;
 use MIME::Base64;
+use Moo;
 
-sub id_code {
-    my $self = shift;
-    my $id = $self->id;
-    $id =~ s/^session://;
-    $id =~ s/\s+$//;
-    return $id;
-}
+has data => (
+    is => 'rw',
+    lazy => 1,
+    default => sub {
+        return unless $_[0]->session_data;
+        Storable::thaw(MIME::Base64::decode($_[0]->session_data));
+    },
+    trigger => sub {
+        $_[0]->session_data(MIME::Base64::encode(Storable::nfreeze($_[1] || '')));
+    },
+);
 
-sub user {
-    my $self = shift;
-    return unless $self->session_data;
-    my $data = Storable::thaw(MIME::Base64::decode($self->session_data));
-    return unless $data->{__user};
-    my $user = $self->result_source->schema->resultset("User")->find($data->{__user}{id});
-    return $user;
-}
+has id_code => (
+    is => 'lazy',
+    default => sub {
+        my $id = $_[0]->id;
+        $id =~ s/^session://;
+        $id =~ s/\s+$//;
+        return $id;
+    }
+);
+
+has user => (
+    is => 'lazy',
+    default => sub {
+        my $data = $_[0]->data or return;
+        return unless $data->{__user};
+        my $user = $_[0]->result_source->schema->resultset("User")->find($data->{__user}{id});
+        return $user;
+    }
+);
 
 1;

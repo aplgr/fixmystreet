@@ -1,9 +1,10 @@
-[% IF c.config.BASE_URL == "https://www.fixmystreet.com" AND (bodyclass == 'waste' OR (problem AND problem.cobrand_data == 'waste')) %]
+[% IF c.config.BASE_URL == "https://www.fixmystreet.com" AND (bodyclass.match('waste') OR (problem AND problem.cobrand_data == 'waste')) %]
 <script src="https://cc.cdn.civiccomputing.com/9/cookieControl-9.7.min.js" type="text/javascript"></script>
 <script nonce="[% csp_nonce %]">
   var config = {
       apiKey: "d92680d5a72175b87ad26cc91e1c4f41994ee659",
       product: "PRO",
+      subDomains: true,
       accessibility: {
           highlightFocus: true,
           outline: true
@@ -22,7 +23,7 @@
           acceptRecommended: "Accept recommended settings",
           closeLabel: "Save settings"
       },
-      cookieConsentExpiry: 365,
+      consentCookieExpiry: 365,
       closeStyle: "button",
       optionalCookies: [
           {

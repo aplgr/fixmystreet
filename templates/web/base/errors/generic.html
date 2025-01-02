@@ -1,13 +1,17 @@
 [% DEFAULT title = loc('Error') %]
-[% INCLUDE 'header.html', bodyclass = 'fullwidthpage', title = title %]
+[% DEFAULT header_class = 'failure' %]
+[% INCLUDE 'header.html', title = title %]
 
 [% IF csrf_token ~%]
 <input type="hidden" name="token" value="[% csrf_token %]">
 [% END ~%]
 
-<div class="confirmation-header confirmation-header--failure">
+<div class="confirmation-header confirmation-header--[% header_class %]">
     <h1>[% title %]</h1>
     <p>[% message | safe %]</p>
+    [% IF error_id %]
+        <small>[% tprintf(loc('Code: %s'), error_id) %]</small>
+    [% END %]
 </div>
 
 [% INCLUDE 'footer.html' %]

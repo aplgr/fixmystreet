@@ -4,6 +4,7 @@ use namespace::autoclean;
 
 BEGIN { extends 'Catalyst::Controller'; }
 
+use FixMyStreet::Geocode::Address;
 use FixMyStreet::Map;
 use Encode;
 use JSON::MaybeXS;
@@ -64,16 +65,22 @@ sub index : Path : Args(0) {
     # Check to see if the spot is covered by a area - if not show an error.
     return unless $c->forward('check_location_is_acceptable', []);
 
-    # Redirect to /report/new in two cases:
+    # Redirect to /report/new in three cases:
     #  - if we have a partial report, so that it can be completed.
     #  - if the cobrand doesn't show anything on /around (e.g. a private
     #    reporting site)
-    if ($partial_report || $c->cobrand->call_hook("skip_around_page")) {
+    #  - if we are setting the location for an offline draft.
+    my $draft = $c->get_param('setDraftLocation');
+    if ($partial_report || $c->cobrand->call_hook("skip_around_page") || defined($draft)) {
         my $params = {
             latitude  => $c->stash->{latitude},
             longitude => $c->stash->{longitude},
             pc        => $c->stash->{pc}
         };
+        if (defined($draft)) {
+            # Tells the frontend JS to use the given offline draft.
+            $params->{restoreDraft} = $draft;
+        }
         if ($partial_report) {
             $params->{partial} = $c->stash->{partial_token}->token;
         } elsif ($c->get_param("category")) {
@@ -368,7 +375,9 @@ sub nearby : Path {
         latitude => $c->get_param('latitude'),
         longitude => $c->get_param('longitude'),
         categories => [ $c->get_param('filter_category') || () ],
+        group => $c->get_param('filter_group'),
         states => $states,
+        bodies => $c->get_param('bodies'),
     };
     $c->cobrand->call_hook('around_nearby_filter', $params);
     $c->forward('/report/_nearby_json', [ $params ]);
@@ -387,11 +396,7 @@ sub location_closest_address : Path('/ajax/closest') {
     }
 
     my $closest = $c->cobrand->find_closest({ latitude => $lat, longitude => $lon });
-    my $data = {
-        road => $closest->{address}{addressLine},
-        full_address => $closest->{name},
-    };
-
+    my $data = $closest->for_around;
     $c->res->body(encode_json($data));
 }
 
@@ -464,17 +469,10 @@ sub lookup_by_ref : Private {
 
     my $params = {};
     my $rs = $c->cobrand->problems;
+
     $rs->non_public_if_possible($params, $c);
-    if ($params->{"-or"}) {
-        $params = {
-            -and => [
-                -or => $criteria,
-                -or => $params->{"-or"},
-            ]
-        };
-    } else {
-        $params->{"-or"} = $criteria;
-    }
+    push @{ $params->{-and} }, { -or => $criteria };
+
     my $problems = $rs->search($params);
 
     my $count = try {

@@ -81,10 +81,16 @@ sub admin_user_domain { 'lincolnshire.gov.uk' }
 
 sub default_map_zoom { 5 }
 
+=item * Uses custom text for the title field for new reports.
+
+=cut
+
+sub new_report_title_field_label {
+    "Location of the problem"
+}
+
 =item * The front page text is tweaked to explain existing report numbers
 can be looked up.
-
-=back
 
 =cut
 
@@ -103,6 +109,16 @@ sub disambiguate_location {
         span   => '0.976148231905086,1.17860658530345',
         bounds => [ 52.6402179235688, -0.820651304784901, 53.6163661554738, 0.357955280518546 ],
     };
+}
+
+=item * Uses OSM as the geocoder as Bing returns addresses for non-existent searches
+
+=back
+
+=cut
+
+sub get_geocoder {
+    return 'OSM';
 }
 
 =head2 lookup_site_code_config
@@ -168,10 +184,9 @@ Lincolnshire uses the following pin colours:
 
 sub pin_colour {
     my ( $self, $p, $context ) = @_;
-    my $ext_status = $p->get_extra_metadata('external_status_code');
 
     return 'grey'
-        if $p->state eq 'not responsible' || !$self->owns_problem($p);
+        if $p->state eq 'not responsible' || ($context ne 'reports' && !$self->owns_problem($p));
     return 'orange'
         if $p->state eq 'investigating' || $p->state eq 'for triage';
     return 'yellow'
@@ -189,10 +204,10 @@ uploading of private photos, so we set the flag for this.
 =cut
 
 around 'open311_config' => sub {
-    my ($orig, $self, $row, $h, $params) = @_;
+    my ($orig, $self, $row, $h, $params, $contact) = @_;
 
     $params->{upload_files} = 1;
-    $self->$orig($row, $h, $params);
+    $self->$orig($row, $h, $params, $contact);
 };
 
 # Find or create a user to associate with externally created Open311 reports.
@@ -223,6 +238,7 @@ sub open311_get_user {
         },
         { key => 'users_email_verified_key' },
     );
+    $user->update({ name => $request->{contact_name} }) if !$user->name;
 
     return $user;
 }

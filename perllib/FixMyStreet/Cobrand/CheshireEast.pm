@@ -68,6 +68,18 @@ sub filter_report_description { "" }
 
 sub get_geocoder { 'OSM' }
 
+=item * Uses custom text for the title field for new reports.
+
+=cut
+
+sub new_report_title_field_label {
+    "Location of the problem"
+}
+
+sub new_report_title_field_hint {
+    "Exact location, including any landmarks"
+}
+
 =item * /around map shows only open reports by default.
 
 =cut
@@ -88,7 +100,7 @@ sub send_questionnaires { 0 }
 
 sub pin_colour {
     my ( $self, $p, $context ) = @_;
-    return 'grey' if $p->state eq 'not responsible' || !$self->owns_problem( $p );
+    return 'grey' if $p->state eq 'not responsible' || ($context ne 'reports' && !$self->owns_problem($p));
     return 'green' if $p->is_fixed || $p->is_closed;
     return 'yellow' if $p->is_in_progress;
     return 'red';
@@ -108,20 +120,6 @@ sub disambiguate_location {
 sub enter_postcode_text {
     'Enter a postcode, or a road and place name';
 }
-
-around open311_extra_data_include => sub {
-    my ($orig, $self, $row, $h) = @_;
-    my $open311_only = $self->$orig($row, $h);
-
-    if ($row->geocode) {
-        my $address = $row->geocode->{resourceSets}->[0]->{resources}->[0]->{address};
-        push @$open311_only, (
-            { name => 'closest_address', value => $address->{formattedAddress} }
-        );
-    }
-
-    return $open311_only
-};
 
 sub geocoder_munge_results {
     my ($self, $result) = @_;
@@ -193,13 +191,12 @@ sub council_rss_alert_options {
 =head2 open311_extra_data_include
 
 For reports made by staff on behalf of another user, append the staff
-user's email & name to the report description.
+user's email & name to the report description, and include closest_address.
 
 =cut
+
 around open311_extra_data_include => sub {
     my ($orig, $self, $row, $h) = @_;
-
-    $h->{ce_original_detail} = $row->detail;
 
     my $contributed_suffix;
     if (my $contributed_by = $row->get_extra_metadata("contributed_by")) {
@@ -218,13 +215,13 @@ around open311_extra_data_include => sub {
         $row->detail($row->detail . $contributed_suffix);
     }
 
+    if (my $address = $row->nearest_address) {
+        push @$open311_only, (
+            { name => 'closest_address', value => $address }
+        );
+    }
+
     return $open311_only;
 };
-
-sub open311_post_send {
-    my ($self, $row, $h) = @_;
-
-    $row->detail($h->{ce_original_detail});
-}
 
 1;

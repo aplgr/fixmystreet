@@ -50,7 +50,6 @@ fixmystreet.assets.add(defaults, {
             attribute: 'sect_label'
         }
     ],
-    all_categories: true,
 
     // motorways are wide and the lines to define them are narrow so we
     // need a bit more margin for error in finding the nearest to stop
@@ -95,7 +94,6 @@ fixmystreet.assets.add(defaults, {
     asset_type: 'road',
     no_asset_msg_id: '#js-not-litter-pick-road',
     no_asset_msgs_class: '.js-roads-he',
-    all_categories: true,
     actions: {
         found: function(layer, feature) {
             if ( $("#js-dbfo-road").is(":hidden") && ( !$('.js-mobile-not-an-asset').length || $('.js-mobile-not-an-asset').is(':hidden')) ) {
@@ -111,8 +109,8 @@ fixmystreet.assets.add(defaults, {
             if (fixmystreet.assets.layers[0].selected_feature) {
                 var road_number = fixmystreet.assets.layers[0].selected_feature.attributes.ROA_NUMBER;
                 if ( $('#js-not-he-road').is(':hidden') && ( !$('.js-mobile-not-an-asset').length || $('.js-mobile-not-an-asset').is(':hidden')) ) {
-                    var category = fixmystreet.reporting.selectedCategory().category;
-                    if ((category === 'Flytipping (NH)' || category === 'Litter (NH)') && (road_number && !road_number.match(/^(M|A\d+M)/)) ) {
+                    var selected = fixmystreet.reporting.selectedCategory();
+                    if ((selected.category === 'Flytipping (NH)' || selected.group === 'Litter') && (road_number && !road_number.match(/^(M|A\d+M)/)) ) {
                         fixmystreet.message_controller.road_not_found(layer);
                         $('#js-top-message').hide();
                         $('.js-reporting-page--category').addClass('hidden-js');

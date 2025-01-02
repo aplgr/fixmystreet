@@ -11,24 +11,8 @@
     background-size: 115px 51px;
 }
 
-#postcodeForm .form-hint {
-    color: $white;
-}
-
 #map_box #map {
     background-color: white;
-}
-
-.btn-primary,
-.green-btn,
-.btn--primary {
-    border: none;
-    background: $green;
-
-    &:hover,
-    &:active {
-        background: lighten($green, 5%);
-    }
 }
 
 .general-notes {

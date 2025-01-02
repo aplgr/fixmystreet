@@ -21,6 +21,14 @@ sub test_overrides; # defined below
 
 use constant TEST_USER_EMAIL => 'fred@example.com';
 
+my $db = FixMyStreet::DB->schema;
+my $user = $db->resultset('User')->find_or_create( {
+    name => 'Fred Bloggs',
+    email => TEST_USER_EMAIL,
+    password => 'dummy',
+    title => 'MR',
+});
+
 my %standard_open311_parameters = (
     'send_notpinpointed' => 0,
     'extended_description' => 1,
@@ -149,13 +157,7 @@ test_overrides hackney =>
         },
         row_data => {
             geocode => {
-                resourceSets => [ {
-                    resources => [ {
-                        address => {
-                            formattedAddress => '1 Test Street, Testville, TE57 1AB'
-                        }
-                    } ],
-                } ],
+                display_name => '1 Test Street, Testville, TE57 1AB'
             }
         },
     },
@@ -171,28 +173,9 @@ test_overrides hackney =>
             { name => 'title', value => 'Problem' },
             { name => 'description', value => 'A big problem' },
             { name => 'category', value => 'ZZ' },
+            { name => 'group', value => '' },
             { name => 'closest_address', value => '1 Test Street, Testville, TE57 1AB' },
         ),
-    });
-
-test_overrides fixmystreet =>
-    {
-        body_name => 'West Berkshire',
-        body_cobrand => 'westberkshire',
-        area_id   => 2619,
-        row_data  => {
-            postcode => 'RG1 1AA',
-        },
-    },
-    superhashof({
-        handler => isa('FixMyStreet::Cobrand::WestBerkshire'),
-        'open311' => noclass(superhashof({
-            %standard_open311_parameters,
-            'endpoints' => {
-                'requests' => 'Requests',
-                'services' => 'Services',
-            },
-        })),
     });
 
 test_overrides fixmystreet =>
@@ -229,6 +212,9 @@ test_overrides fixmystreet =>
         row_data  => {
             used_map => 0,
             postcode => 'WV7 3EX',
+            extra => {
+                contributed_by => $user->id,
+            },
         },
     },
     superhashof({
@@ -240,6 +226,7 @@ test_overrides fixmystreet =>
             { name => 'report_url',  value => undef     },
             { name => 'title',       value => 'Problem' },
             { name => 'site_code',   value => 'Road ID' },
+            { name => 'contributed_by', value => 1 },
             { name => 'description', value => qq/NOTE:
 Map was not used; location may not be accurate.
 Search string used: WV7 3EX
@@ -250,22 +237,65 @@ A big problem/
     }),
     [ { name => 'site_code', value => 'Road ID' } ];
 
+test_overrides fixmystreet =>
+    {
+        body_name => 'Buckinghamshire',
+        body_cobrand => 'buckinghamshire',
+        area_id   => 2217,
+        row_data  => {
+            postcode => 'HP19 7QF',
+            extra => [
+                { name => 'ADDRESS_POSTCODE', value => "1 Test Road\nTestville\nHP19 7QF" },
+                { name => 'TELEPHONE_NUMBER', value => "07123 456789" },
+            ],
+        },
+    },
+    superhashof({
+        handler => isa('FixMyStreet::Cobrand::Buckinghamshire'),
+        'open311' => noclass(superhashof({
+            %standard_open311_parameters,
+        })),
+        problem_extra => bag(
+            { name => 'group',       value => '' },
+            { name => 'category',       value => 'ZZ' },
+            { name => 'asset_resource_id',       value => 'Road ID' },
+            { name => 'report_url',       value => undef },
+            { name => 'title',       value => 'Problem' },
+            { name => 'ADDRESS_POSTCODE', value => "1 Test Road\nTestville\nHP19 7QF" },
+            { name => 'TELEPHONE_NUMBER', value => "07123 456789" },
+            { name => 'description', value => qq/A big problem
+
+Address:
+1 Test Road
+Testville
+HP19 7QF
+
+Phone:
+07123 456789/
+            },
+        ),
+    }),
+    [
+        { name => 'ADDRESS_POSTCODE', value => "1 Test Road\nTestville\nHP19 7QF" },
+        { name => 'TELEPHONE_NUMBER', value => "07123 456789" },
+        { name => 'asset_resource_id', value => 'Road ID' },
+    ];
+
 sub test_overrides {
     # NB: Open311 and ::SendReport::Open311 are mocked below in BEGIN { ... }
     my ($cobrand, $input, $expected_data, $end_extra) = @_;
     subtest "$cobrand ($input->{body_name}) overrides" => sub {
 
         FixMyStreet::override_config {
-            ALLOWED_COBRANDS => ['fixmystreet', 'oxfordshire', 'bromley', 'westberkshire', 'greenwich', 'cheshireeast', 'hackney', 'shropshire'],
+            ALLOWED_COBRANDS => ['fixmystreet', 'oxfordshire', 'bromley', 'greenwich', 'cheshireeast', 'hackney', 'shropshire', 'buckinghamshire'],
         }, sub {
-            my $db = FixMyStreet::DB->schema;
             #$db->txn_begin;
 
             my $params = { name => $input->{body_name} };
             my $body = $db->resultset('Body')->find_or_create($params);
             $body->body_areas->find_or_create({ area_id => $input->{area_id} });
             ok $body, "found/created body " . $input->{body_name};
-            $body->set_extra_metadata(cobrand => $input->{body_cobrand});
+            $body->cobrand($input->{body_cobrand});
             $body->can_be_devolved(1);
             $body->update;
 
@@ -281,13 +311,6 @@ sub test_overrides {
                 body_id => $body->id,
             );
             $contact->update({ send_method => 'Open311', endpoint => 'http://example.com/open311' });
-
-            my $user = $db->resultset('User')->find_or_create( {
-                    name => 'Fred Bloggs',
-                    email => TEST_USER_EMAIL,
-                    password => 'dummy',
-                    title => 'MR',
-            });
 
             my $row = $db->resultset('Problem')->create( {
                 title => 'Problem',

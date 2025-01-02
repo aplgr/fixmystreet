@@ -11,13 +11,13 @@ use Test::MockObject::Extends;
 my $mech = FixMyStreet::TestMech->new;
 
 my $user = $mech->create_user_ok('system_user@example.com', name => 'test users');
-my $body = $mech->create_body_ok(2482, 'Bromley', {}, { cobrand => 'bromley' });
+my $body = $mech->create_body_ok(2482, 'Bromley', { cobrand => 'bromley' });
 my $contact = $mech->create_contact_ok( body_id => $body->id, category => 'Sidewalk and Curb Issues', email => 'sidewalks' );
 
-my $body2 = $mech->create_body_ok(163793, 'Buckinghamshire', {}, { cobrand => 'buckinghamshire' });
+my $body2 = $mech->create_body_ok(163793, 'Buckinghamshire', { cobrand => 'buckinghamshire' });
 my $contact2 = $mech->create_contact_ok( body_id => $body2->id, category => 'Sidewalk and Curb Issues', email => 'sidewalks' );
 
-my $hounslow = $mech->create_body_ok(2483, 'Hounslow', {}, { cobrand => 'hounslow' });
+my $hounslow = $mech->create_body_ok(2483, 'Hounslow', { cobrand => 'hounslow' });
 my $hounslowcontact = $mech->create_contact_ok( body_id => $hounslow->id, category => 'Sidewalk and Curb Issues', email => 'sidewalks' );
 
 my $dtf = DateTime::Format::W3CDTF->new;
@@ -488,6 +488,76 @@ for my $test (
         $q->first->delete if $test->{count};
     };
 }
+
+my $glos_xml = qq[<?xml version="1.0" encoding="utf-8"?>
+<service_requests>
+  <request>
+    <lat>51.896268</lat>
+    <long>-2.093063</long>
+    <requested_datetime>2010-04-14T06:37:38-08:00</requested_datetime>
+    <service_code>HIGH_HI88</service_code>
+    <service_name>Japanese Knotweed</service_name>
+    <service_request_id>22032542</service_request_id>
+    <status>open</status>
+    <updated_datetime>2010-04-14T06:37:38-08:00</updated_datetime>
+  </request>
+  <request>
+    <lat>51.896268</lat>
+    <long>-2.093063</long>
+    <non_public>1</non_public>
+    <requested_datetime>2010-04-14T06:37:38-08:00</requested_datetime>
+    <service_code>HIGH_HI04</service_code>
+    <service_name>Other debris which is not blocking the road</service_name>
+    <service_request_id>22032543</service_request_id>
+    <status>open</status>
+    <updated_datetime>2010-04-14T06:37:38-08:00</updated_datetime>
+  </request>
+</service_requests>
+];
+
+subtest 'Gloucestershire ' => sub {
+    my $gloucestershire = $mech->create_body_ok( 2226, 'Gloucestershire',
+        { cobrand => 'gloucestershire' } );
+    my $glos_contact_debris = $mech->create_contact_ok(
+        body_id => $gloucestershire->id,
+        category => 'Other debris which is not blocking the road',
+        email => 'HIGH_HI04',
+    );
+    my $glos_contact_weeds = $mech->create_contact_ok(
+        body_id => $gloucestershire->id,
+        category => 'Japanese Knotweed',
+        email => 'HIGH_HI88',
+    );
+
+    my $o = Open311->new(
+        jurisdiction => 'mysociety',
+        endpoint     => 'http://example.com',
+    );
+    Open311->_inject_response( '/requests.xml', $glos_xml );
+
+    my $update = Open311::GetServiceRequests->new(
+        system_user => $user,
+        start_date  => $start_date,
+        end_date    => $end_date,
+    );
+
+    FixMyStreet::override_config {
+        MAPIT_URL => 'http://mapit.uk/',
+        ALLOWED_COBRANDS => [ 'gloucestershire' ],
+    }, sub {
+        $update->create_problems( $o, $gloucestershire );
+    };
+
+    my $q = FixMyStreet::DB->resultset('Problem')->search(
+        { bodies_str => { like => $gloucestershire->id } }
+    );
+
+    is $q->count, 1, 'problem count is correct';
+    is $q->first->title, 'Japanese Knotweed problem',
+        'correct problem fetched';
+
+    $q->first->delete;
+};
 
 subtest "non_public contacts result in non_public reports" => sub {
 

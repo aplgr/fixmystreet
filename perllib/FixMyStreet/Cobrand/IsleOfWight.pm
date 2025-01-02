@@ -71,6 +71,14 @@ sub filter_report_description { "" }
 
 sub get_geocoder { 'OSM' }
 
+=item * Uses custom text for the title field for new reports.
+
+=cut
+
+sub new_report_title_field_label {
+    "Summarise the problem and location"
+}
+
 =item * /around map shows only open reports by default.
 
 =cut
@@ -118,10 +126,10 @@ sub lookup_site_code_config { {
 sub open311_extra_data_exclude { [ '^urgent$' ] }
 
 around 'open311_config' => sub {
-    my ($orig, $self, $row, $h, $params) = @_;
+    my ($orig, $self, $row, $h, $params, $contact) = @_;
 
     $params->{upload_files} = 1;
-    $self->$orig($row, $h, $params);
+    $self->$orig($row, $h, $params, $contact);
 };
 
 sub open311_munge_update_params {
@@ -143,7 +151,7 @@ sub munge_reports_category_list {
     my ($self, $categories) = @_;
 
     my $user = $self->{c}->user;
-    my %bodies = map { $_->body->name => $_->body } @$categories;
+    my %bodies = map { $_->body->get_column('name') => $_->body } @$categories;
     my $b = $bodies{'Isle of Wight Council'};
 
     if ( $user && ( $user->is_superuser || $user->belongs_to_body( $b->id ) ) ) {
@@ -159,7 +167,7 @@ sub munge_report_new_contacts {
     my ($self, $contacts) = @_;
 
     my $user = $self->{c}->user;
-    my %bodies = map { $_->body->name => $_->body } @$contacts;
+    my %bodies = map { $_->body->get_column('name') => $_->body } @$contacts;
     my $b = $bodies{'Isle of Wight Council'};
 
     if ( $user && ( $user->is_superuser || $user->belongs_to_body( $b->id ) ) ) {
